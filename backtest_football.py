@@ -39,22 +39,22 @@ DB_PATH      = "backtest_data.db"
 SAISONS_BACKTEST = [2023, 2024]  # 2023 = saison 2023-24 pour ligues hivernales
 
 CHAMPIONNATS = [
-    {"nom": "La Liga",          "id": 140, "key": "soccer_spain_la_liga",            "c1": 4,  "rel": 18},
-    {"nom": "Bundesliga",       "id": 78,  "key": "soccer_germany_bundesliga",        "c1": 4,  "rel": 16},
-    {"nom": "Eredivisie",       "id": 88,  "key": "soccer_netherlands_eredivisie",    "c1": 2,  "rel": 16},
-    {"nom": "Serie A",          "id": 135, "key": "soccer_italy_serie_a",             "c1": 4,  "rel": 18},
-    {"nom": "Primeira Liga",    "id": 94,  "key": "soccer_portugal_primeira_liga",    "c1": 2,  "rel": 16},
-    {"nom": "Süper Lig",        "id": 203, "key": "soccer_turkey_super_league",       "c1": 2,  "rel": 17},
-    {"nom": "Allsvenskan",      "id": 113, "key": "soccer_sweden_allsvenskan",        "c1": 3,  "rel": 14},
-    {"nom": "Série A Brésil",   "id": 71,  "key": "soccer_brazil_campeonato",         "c1": 6,  "rel": 17},
-    {"nom": "Ligue 1",          "id": 61,  "key": "soccer_france_ligue_one",          "c1": 4,  "rel": 16},
-    {"nom": "LaLiga 2",         "id": 141, "key": "soccer_spain_segunda_division",    "c1": 2,  "rel": 19},
-    {"nom": "Premier League",   "id": 39,  "key": "soccer_epl",                       "c1": 4,  "rel": 18},
-    {"nom": "Championship",     "id": 40,  "key": "soccer_england_championship",      "c1": 2,  "rel": 22},
-    {"nom": "MLS",              "id": 253, "key": "soccer_usa_mls",                   "c1": 7,  "rel": 99},
-    {"nom": "Eliteserien",      "id": 103, "key": "soccer_norway_eliteserien",        "c1": 2,  "rel": 14},
-    {"nom": "Jupiler Pro",      "id": 144, "key": "soccer_belgium_first_div",         "c1": 6,  "rel": 13},
-    {"nom": "Serie B",          "id": 136, "key": "soccer_italy_serie_b",             "c1": 2,  "rel": 16},
+    {"nom": "La Liga",          "id": 140, "key": "soccer_spain_la_liga",            "c1": 4,  "rel": 18, "ev_min": 0.05, "ev_max": 0.15},
+    {"nom": "Bundesliga",       "id": 78,  "key": "soccer_germany_bundesliga",        "c1": 4,  "rel": 16, "ev_min": 0.05, "ev_max": 0.15},
+    {"nom": "Eredivisie",       "id": 88,  "key": "soccer_netherlands_eredivisie",    "c1": 2,  "rel": 16, "ev_min": 0.05, "ev_max": 0.15},
+    {"nom": "Serie A",          "id": 135, "key": "soccer_italy_serie_a",             "c1": 4,  "rel": 18, "ev_min": 0.05, "ev_max": 0.15},
+    {"nom": "Primeira Liga",    "id": 94,  "key": "soccer_portugal_primeira_liga",    "c1": 2,  "rel": 16, "ev_min": 0.05, "ev_max": 0.15},
+    {"nom": "Süper Lig",        "id": 203, "key": "soccer_turkey_super_league",       "c1": 2,  "rel": 17, "ev_min": 0.05, "ev_max": 0.15},
+    {"nom": "Allsvenskan",      "id": 113, "key": "soccer_sweden_allsvenskan",        "c1": 3,  "rel": 14, "ev_min": 0.05, "ev_max": 0.15},
+    {"nom": "Série A Brésil",   "id": 71,  "key": "soccer_brazil_campeonato",         "c1": 6,  "rel": 17, "ev_min": 0.05, "ev_max": 0.15},
+    {"nom": "Ligue 1",          "id": 61,  "key": "soccer_france_ligue_one",          "c1": 4,  "rel": 16, "ev_min": 0.05, "ev_max": 0.15},
+    {"nom": "LaLiga 2",         "id": 141, "key": "soccer_spain_segunda_division",    "c1": 2,  "rel": 19, "ev_min": 0.05, "ev_max": 0.15},
+    {"nom": "Premier League",   "id": 39,  "key": "soccer_epl",                       "c1": 4,  "rel": 18, "ev_min": 0.05, "ev_max": 0.15},
+    {"nom": "Championship",     "id": 40,  "key": "soccer_england_championship",      "c1": 2,  "rel": 22, "ev_min": 0.05, "ev_max": 0.15},
+    {"nom": "MLS",              "id": 253, "key": "soccer_usa_mls",                   "c1": 7,  "rel": 99, "ev_min": 0.05, "ev_max": 0.15},
+    {"nom": "Eliteserien",      "id": 103, "key": "soccer_norway_eliteserien",        "c1": 2,  "rel": 14, "ev_min": 0.05, "ev_max": 0.15},
+    {"nom": "Jupiler Pro",      "id": 144, "key": "soccer_belgium_first_div",         "c1": 6,  "rel": 13, "ev_min": 0.05, "ev_max": 0.15},
+    {"nom": "Serie B",          "id": 136, "key": "soccer_italy_serie_b",             "c1": 2,  "rel": 16, "ev_min": 0.05, "ev_max": 0.15},
 ]
 
 RHO_PAR_LIGUE = {
@@ -63,11 +63,12 @@ RHO_PAR_LIGUE = {
     203: -0.08, 71: -0.08, 113: -0.11, 103: -0.10, 144: -0.12, 253: -0.09,
 }
 RHO_DEFAULT  = -0.12
-KELLY_FRAC   = 0.05   # réduit à 5% — adapté au niveau d'edge réel du modèle
-EV_MIN       = 0.08   # relevé à 8% pour plus de sélectivité (était 5%)
-EV_MAX       = 0.20
-MIN_COTE     = 1.70   # ignorer les handicaps trop courts (< 1.70)
-N_PRIOR      = 8      # matchs-équivalents shrinkage bayésien
+KELLY_FRAC      = 0.05   # fraction Kelly (5% — aligné avec le bot)
+MIN_COTE        = 1.70   # ignorer les handicaps trop courts (< 1.70)
+N_PRIOR         = 8      # matchs-équivalents shrinkage bayésien
+# Poids du modèle dans le blend EV à H-24 : poids_dyn = 0.15 + 0.15*(24/168) ≈ 0.171
+# Réplique la pondération dynamique du bot pour les paris pris environ 24h avant le coup d'envoi.
+POIDS_DYN_H24   = 0.171
 
 NAME_MAPPING = {
     # 🇫🇷 LIGUE 1
@@ -748,17 +749,36 @@ async def simuler_paris(conn):
             # Moyenne de buts de la ligue calculée dynamiquement (remplace 1.3 hardcodé)
             avg_ligue = await calculer_ligue_avg(conn, ligue['id'], saison, date_utc)
 
-            # Reconstituer xG AVANT ce match — split home/away comme le bot principal
-            xg_off_d, xg_def_d, n_d = await reconstruire_xg_equipe(
+            # Reconstituer xG AVANT ce match — split home/away + global comme le bot principal
+            xg_off_d_sp, xg_def_d_sp, n_d = await reconstruire_xg_equipe(
                 conn, h_id, ligue['id'], date_utc, saison, venue='home', ligue_avg=avg_ligue
             )
-            xg_off_e, xg_def_e, n_e = await reconstruire_xg_equipe(
+            xg_off_e_sp, xg_def_e_sp, n_e = await reconstruire_xg_equipe(
                 conn, a_id, ligue['id'], date_utc, saison, venue='away', ligue_avg=avg_ligue
             )
 
             # Filtre : ignorer si l'une des équipes manque d'historique suffisant
             if n_d < 8 or n_e < 8:
                 continue
+
+            # Venue blending adaptatif : réplique w_venue() du bot
+            # Moins de matchs venue-spécifiques → on se fie davantage aux stats globales
+            xg_off_d_gl, xg_def_d_gl, _ = await reconstruire_xg_equipe(
+                conn, h_id, ligue['id'], date_utc, saison, venue='all', ligue_avg=avg_ligue
+            )
+            xg_off_e_gl, xg_def_e_gl, _ = await reconstruire_xg_equipe(
+                conn, a_id, ligue['id'], date_utc, saison, venue='all', ligue_avg=avg_ligue
+            )
+
+            def w_venue(n_spec, max_w=0.80):
+                return min(max_w, (n_spec / 10.0) * max_w)
+
+            wd = w_venue(n_d)
+            we = w_venue(n_e)
+            xg_off_d = xg_off_d_sp * wd + xg_off_d_gl * (1.0 - wd)
+            xg_def_d = xg_def_d_sp * wd + xg_def_d_gl * (1.0 - wd)
+            xg_off_e = xg_off_e_sp * we + xg_off_e_gl * (1.0 - we)
+            xg_def_e = xg_def_e_sp * we + xg_def_e_gl * (1.0 - we)
 
             # Paramètres Poisson Dixon-Coles avec avantage domicile implicite via split venue
             L_A = max(0.4, (xg_off_d + xg_def_e) / 2)
@@ -769,7 +789,17 @@ async def simuler_paris(conn):
 
             # Parcourir les marchés — collecter tous les signaux valides pour ce fixture
             home_name_odds = NAME_MAPPING.get(h_name, h_name)
-            candidats = []  # (ev, market, outcome, h_val, cote_h24, is_home_or_over)
+            candidats = []  # (ev_final, market, outcome, h_val, cote_h24, k, mise, is_home)
+
+            ev_min_l = ligue.get('ev_min', 0.05)
+            ev_max_l = ligue.get('ev_max', 0.15)
+
+            # Index (market, h_val) → cotes des deux côtés pour calcul no-vig
+            # Le partenaire d'un outcome (spreads, h) est l'outcome (spreads, -h)
+            partner_cote: dict = {}
+            for mk, out, hv, c in odds_h24:
+                if mk == 'spreads':
+                    partner_cote[(mk, hv)] = c
 
             for market, outcome, h_val, cote_h24 in odds_h24:
                 # Handicap Asiatique uniquement — les Totaux n'ont pas d'edge démontré
@@ -783,25 +813,36 @@ async def simuler_paris(conn):
                     process.extractOne(outcome, [home_name_odds])[1] > 85
                 )
 
-                ev = ev_ah(mat, h_val, is_home, cote_h24)
-                k  = kelly_ah(mat, h_val, is_home, cote_h24)
-                flag = is_home
+                ev_modele = ev_ah(mat, h_val, is_home, cote_h24)
+                k = kelly_ah(mat, h_val, is_home, cote_h24)
 
-                if not (EV_MIN <= ev <= EV_MAX):
+                # Calcul EV Pinnacle no-vig (réplique du blend du bot)
+                # La cote partenaire est stockée sous la clé (-h_val)
+                cote_partner = partner_cote.get((market, -h_val))
+                if cote_partner and cote_partner > 1.0:
+                    ovr = (1.0 / cote_h24) + (1.0 / cote_partner)
+                    cote_novig = cote_h24 / ovr
+                    ev_pinnacle = ev_ah(mat, h_val, is_home, cote_novig)
+                else:
+                    ev_pinnacle = ev_modele  # fallback si partenaire absent
+
+                ev_final = ev_modele * POIDS_DYN_H24 + ev_pinnacle * (1.0 - POIDS_DYN_H24)
+
+                if not (ev_min_l <= ev_final <= ev_max_l):
                     continue
 
                 mise = min(round(k * 100 * KELLY_FRAC, 2), 5.0)
                 if mise < 0.1:
                     continue
 
-                candidats.append((ev, market, outcome, h_val, cote_h24, k, mise, flag))
+                candidats.append((ev_final, market, outcome, h_val, cote_h24, k, mise, is_home))
 
             if not candidats:
                 continue
 
-            # 🔒 FILTRE 1 PARI/MATCH : garder uniquement le signal avec le meilleur EV
+            # 🔒 FILTRE 1 PARI/MATCH : garder uniquement le signal avec le meilleur EV final
             candidats.sort(key=lambda x: x[0], reverse=True)
-            ev, market, outcome, h_val, cote_h24, k, mise, flag = candidats[0]
+            ev_final, market, outcome, h_val, cote_h24, k, mise, flag = candidats[0]
 
             # Cote de clôture
             async with conn.execute(
@@ -822,7 +863,7 @@ async def simuler_paris(conn):
             await conn.execute(
                 "INSERT OR REPLACE INTO bt_signaux VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (fid, ligue['id'], saison, market, outcome, h_val,
-                 cote_h24, cote_cloture, round(ev, 4), round(k, 4),
+                 cote_h24, cote_cloture, round(ev_final, 4), round(k, 4),
                  mise, gh, ga, res, clv)
             )
             signaux += 1
