@@ -1,4 +1,4 @@
-import requests, json, os, time, logging, csv
+import requests, json, os, time, logging, csv, signal
 import numpy as np
 from scipy.stats import poisson
 from scipy.optimize import minimize_scalar
@@ -1067,17 +1067,37 @@ def obtenir_saison_api(nom_ligue):
     else:
         return annee_actuelle
 
-async def obtenir_meteo(session, team_home_id):
-    """Récupère la météo du stade à l'instant T."""
+async def obtenir_meteo(session, team_home_id, kickoff_dt=None):
+    """
+    Récupère la météo prévue à l'heure du coup d'envoi (forecast).
+    Si kickoff_dt est None ou H < 4, fallback sur la météo actuelle.
+    Utilise forecast 3h si disponible (OpenWeather gratuit).
+    """
     coords = STADES_GPS.get(team_home_id)
     if not coords:
         return 0.0, 0.0
 
     lat, lon = coords
-    url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={API_METEO_KEY}&units=metric"
+    now_utc = datetime.now(timezone.utc)
 
     try:
-        res = await fetch_async(session, url)
+        # Forecast disponible si le match est dans les 5 jours et H > 1h
+        if kickoff_dt and (kickoff_dt - now_utc).total_seconds() > 3600:
+            url_fc = (f"https://api.openweathermap.org/data/2.5/forecast"
+                      f"?lat={lat}&lon={lon}&appid={API_METEO_KEY}&units=metric&cnt=16")
+            res_fc = await fetch_async(session, url_fc)
+            if res_fc and res_fc.get('list'):
+                # Trouver l'entrée forecast la plus proche de l'heure du KO
+                ko_ts = kickoff_dt.timestamp()
+                best = min(res_fc['list'], key=lambda e: abs(e['dt'] - ko_ts))
+                vent_kmh = best.get('wind', {}).get('speed', 0) * 3.6
+                pluie_mm = best.get('rain', {}).get('3h', 0)
+                return vent_kmh, pluie_mm
+
+        # Fallback : météo actuelle (si match < 1h ou forecast indisponible)
+        url_cur = (f"https://api.openweathermap.org/data/2.5/weather"
+                   f"?lat={lat}&lon={lon}&appid={API_METEO_KEY}&units=metric")
+        res = await fetch_async(session, url_cur)
         if res:
             vent_kmh = res.get('wind', {}).get('speed', 0) * 3.6
             pluie_mm = res.get('rain', {}).get('1h', 0)
@@ -1101,6 +1121,44 @@ def appliquer_penalite_meteo(xg_base, vent_kmh, pluie_mm):
 
     multiplicateur = max(0.80, multiplicateur)
     return xg_base * multiplicateur
+
+# ==========================================
+# 🗄️ COLLECTE HISTORIQUE — scores_matchs
+# ==========================================
+async def collecter_scores_historiques(session, ligue, saison):
+    """
+    Récupère tous les matchs FT d'une ligue/saison et les insère dans scores_matchs.
+    Appelé une fois par jour pour alimenter l'estimation MLE de ρ.
+    Fonctionne par lots de 20 fixtures pour respecter les limites API-Football.
+    """
+    url = f"{URL_FOOTBALL}/fixtures?league={ligue['id']}&season={saison}&status=FT"
+    data = await fetch_async(session, url, HEADERS_FB)
+    if not data or not data.get('response'):
+        return 0
+
+    fixtures = data['response']
+    inserts = 0
+    for i in range(0, len(fixtures), 20):
+        lot = fixtures[i:i+20]
+        async with db_lock:
+            await db_conn.executemany(
+                "INSERT OR IGNORE INTO scores_matchs (id_match, ligue_id, saison, buts_dom, buts_ext) VALUES (?,?,?,?,?)",
+                [
+                    (f['fixture']['id'],
+                     f['league']['id'],
+                     f['league']['season'],
+                     f['goals']['home'],
+                     f['goals']['away'])
+                    for f in lot
+                    if f['goals']['home'] is not None and f['goals']['away'] is not None
+                ]
+            )
+            await db_conn.commit()
+        inserts += len(lot)
+
+    log_info(f"📊 scores_matchs : {inserts} matchs FT chargés pour {ligue['nom']} {saison}.")
+    return inserts
+
 
 # ==========================================
 # 🧮 3. RÈGLEMENTS & STATS
@@ -1172,11 +1230,11 @@ async def verifier_resultats_matchs(session):
                     is_h = score_home > score_away
                     diff = (gh + h_val - ga) if is_h else (ga + h_val - gh)
 
-                if diff > 0.25: mult, stat = cote - 1, "WON"
-                elif diff == 0.25: mult, stat = (cote - 1) / 2, "HALF-WON"
-                elif diff == 0: mult, stat = 0, "VOID"
-                elif diff == -0.25: mult, stat = -0.5, "HALF-LOST"
-                else: mult, stat = -1.0, "LOST"
+                if diff > 0.25 + _EPS_AH:               mult, stat = cote - 1,         "WON"
+                elif abs(diff - 0.25) < _EPS_AH:        mult, stat = (cote - 1) / 2,  "HALF-WON"
+                elif abs(diff) < _EPS_AH:               mult, stat = 0,                "VOID"
+                elif abs(diff + 0.25) < _EPS_AH:        mult, stat = -0.5,             "HALF-LOST"
+                else:                                    mult, stat = -1.0,             "LOST"
 
                 profit_reel = round(mult * mise_initiale, 2)
 
@@ -1258,7 +1316,7 @@ async def evaluer_force_lineup(session, fixture_id, team_id, saison_correcte, de
 # ==========================================
 # 🎯 4. ANALYSEUR HYBRIDE
 # ==========================================
-async def analyser_un_match(session, m, ligue, saison_correcte, sos_map, mot_map, bias_map, luck_map, m_dom_l, m_ext_l, cotes_data):
+async def analyser_un_match(session, m, ligue, saison_correcte, sos_map, mot_map, luck_map, m_dom_l, m_ext_l, cotes_data):
     n_d, n_e = m['teams']['home']['name'], m['teams']['away']['name']
     id_d, id_e, id_m = m['teams']['home']['id'], m['teams']['away']['id'], m['fixture']['id']
 
@@ -1305,15 +1363,18 @@ async def analyser_un_match(session, m, ligue, saison_correcte, sos_map, mot_map
     outcomes = pinnacle['markets'][0].get('outcomes')
     if not outcomes or len(outcomes) < 2: return
 
-    ovr = (1/float(outcomes[0]['price'])) + (1/float(outcomes[1]['price']))
 
     res_lineups = await fetch_async(session, f"{URL_FOOTBALL}/fixtures/lineups?fixture={id_m}", HEADERS_FB)
     lineup_ok = True if res_lineups and res_lineups.get('response') else False
 
-    xg_d_home = await obtenir_xg_moyenne_async(session, id_d, ligue['id'], saison_correcte, sos_map, m_dom_l, venue='home')
-    xg_e_away = await obtenir_xg_moyenne_async(session, id_e, ligue['id'], saison_correcte, sos_map, m_ext_l, venue='away')
-    xg_d_all = await obtenir_xg_moyenne_async(session, id_d, ligue['id'], saison_correcte, sos_map, m_dom_l, venue='all')
-    xg_e_all = await obtenir_xg_moyenne_async(session, id_e, ligue['id'], saison_correcte, sos_map, m_ext_l, venue='all')
+    # ligue_avg_def : moyenne des buts encaissés par match selon le venue
+    # Home team concède en moyenne m_ext_l (buts marqués par les visiteurs)
+    # Away team concède en moyenne m_dom_l (buts marqués par les équipes à domicile)
+    xg_d_home = await obtenir_xg_moyenne_async(session, id_d, ligue['id'], saison_correcte, sos_map, m_dom_l, venue='home', ligue_avg_def=m_ext_l)
+    xg_e_away = await obtenir_xg_moyenne_async(session, id_e, ligue['id'], saison_correcte, sos_map, m_ext_l, venue='away', ligue_avg_def=m_dom_l)
+    ligue_avg_all = (m_dom_l + m_ext_l) / 2
+    xg_d_all = await obtenir_xg_moyenne_async(session, id_d, ligue['id'], saison_correcte, sos_map, ligue_avg_all, venue='all', ligue_avg_def=ligue_avg_all)
+    xg_e_all = await obtenir_xg_moyenne_async(session, id_e, ligue['id'], saison_correcte, sos_map, ligue_avg_all, venue='all', ligue_avg_def=ligue_avg_all)
 
     # Pondération venue adaptative : la confiance dans les stats spécifiques (dom/ext)
     # croît avec la taille d'échantillon. Moins de 5 matchs → on se fie surtout au global.
@@ -1334,8 +1395,7 @@ async def analyser_un_match(session, m, ligue, saison_correcte, sos_map, mot_map
         (xg_e_away[1] * w_e_spec) + (xg_e_all[1] * w_e_glob)
     )
 
-    # bias_map retiré : l'avantage domicile/extérieur est déjà capturé
-    # par venue='home'/'away' dans obtenir_xg_moyenne_async (évite le double-comptage)
+    # L'avantage domicile/extérieur est capturé par venue='home'/'away' dans obtenir_xg_moyenne_async.
     d_d = (mot_map.get(id_d, 1.0)-1) + (luck_map.get(id_d, 1.0)-1)
     d_e = (mot_map.get(id_e, 1.0)-1) + (luck_map.get(id_e, 1.0)-1)
     m_d, m_e = 1.0 + max(-0.25, min(0.25, d_d)), 1.0 + max(-0.25, min(0.25, d_e))
@@ -1344,11 +1404,13 @@ async def analyser_un_match(session, m, ligue, saison_correcte, sos_map, mot_map
     L_B_base = (xg_e[0] * m_e / m_ext_l) * (xg_d[1] / m_ext_l) * m_ext_l
 
     # --- ⛈️ INTÉGRATION DU WEATHER EDGE ---
-    vent, pluie = await obtenir_meteo(session, id_d)
-    if vent > 25 or pluie > 5:
-        L_A_base = appliquer_penalite_meteo(L_A_base, vent, pluie)
-        L_B_base = appliquer_penalite_meteo(L_B_base, vent, pluie)
-        log_info(f"⛈️ Alerte Météo ({n_d}) : Vent {vent:.1f}km/h | Pluie {pluie}mm. xG réduits.")
+    # Météo activée seulement à H < 6 (prévision fiable + marché peu anticipé)
+    if hr < 6.0:
+        vent, pluie = await obtenir_meteo(session, id_d, kickoff_dt=dt_obj)
+        if vent > 25 or pluie > 5:
+            L_A_base = appliquer_penalite_meteo(L_A_base, vent, pluie)
+            L_B_base = appliquer_penalite_meteo(L_B_base, vent, pluie)
+            log_info(f"⛈️ Alerte Météo ({n_d}) : Vent {vent:.1f}km/h | Pluie {pluie}mm. xG réduits.")
 
     # --- 🛡️ FILTRE PRÉLIMINAIRE (ÉCONOMISEUR D'API) ---
     # Noms des équipes côté odds API pour comparaison exacte dans la boucle
@@ -1436,55 +1498,44 @@ async def analyser_un_match(session, m, ligue, saison_correcte, sos_map, mot_map
                 ) as cursor:
                     deja_parie_ce_match = await cursor.fetchone()
 
-            # --- 🚨 LOGIQUE DE SURVEILLANCE (Mise à jour CLV) ---
+            # Pari déjà enregistré → le tracker_clv_async gère les mises à jour CLV.
             if pari_exact:
-                cote_initiale, statut = pari_exact
-                if statut == 'PENDING' and hr <= 1.5:
-                    async with db_lock:
-                        await db_conn.execute(
-                            "UPDATE paris_log SET cote_cloture=?, clv=(? / ?)-1 WHERE id_match=? AND equipe=? AND handicap=?",
-                            (cote, cote_initiale, cote, id_m, nom, h)
-                        )
-                        await db_conn.commit()
                 continue
 
             # --- 🎯 LOGIQUE NOUVEAU PARI ---
             elif not deja_parie_ce_match:
-                if market_key == 'spreads':
-                    # Comparaison exacte : out['name'] est le nom de l'équipe côté odds API
-                    is_h_odds = (nom == home_team_odds)
-                    ev_modele = calculer_ev_ah(mat, h, is_h_odds, cote)
+                is_h_odds = (nom == home_team_odds)
+
+                # Choisir la matrice active selon l'état des compositions
+                # Si rotation massive détectée (mat_lineup_drop calculé), on l'utilise
+                # et on exige un EV minimum supplémentaire de +2% pour absorber l'incertitude.
+                if mat_lineup_drop is not None:
+                    mat_actif = mat_lineup_drop
+                    ev_min_rotation = ev_min_effectif + 0.02
                 else:
-                    is_over = "Over" in nom
-                    ev_modele = calculer_ev_total_asiatique(mat, h, is_over, cote)
+                    mat_actif = mat
+                    ev_min_rotation = ev_min_effectif
+
+                ev_modele = calculer_ev_ah(mat_actif, h, is_h_odds, cote)
 
                 # Signal Pinnacle désvigué (méthode proportionnelle)
-                # Remplace l'ancien ev_bookmaker toujours négatif (overround brut)
-                # → donne un vrai second signal basé sur le prix sharp de référence
                 cote_novig = cote / ovr_market
-                if market_key == 'spreads':
-                    ev_pinnacle = calculer_ev_ah(mat, h, is_h_odds, cote_novig)
-                else:
-                    ev_pinnacle = calculer_ev_total_asiatique(mat, h, is_over, cote_novig)
+                ev_pinnacle = calculer_ev_ah(mat_actif, h, is_h_odds, cote_novig)
                 ev_final = (ev_modele * poids_dyn) + (ev_pinnacle * (1 - poids_dyn))
 
-                if ev_min_effectif <= ev_final <= ligue['ev_max']:
-                    # Kelly exact pour AH/Total : approximation mean-variance f*=E[X]/E[X²]
-                    # Corrige le sous-dimensionnement du Kelly binaire sur les paris à 5 issues
-                    if market_key == 'spreads':
-                        kelly_theorique = calculer_kelly_ah(mat, h, is_h_odds, cote)
-                    else:
-                        kelly_theorique = calculer_kelly_total(mat, h, is_over, cote)
+                if ev_min_rotation <= ev_final <= ligue['ev_max']:
+                    kelly_theorique = calculer_kelly_ah(mat_actif, h, is_h_odds, cote)
                     mise_u = round((kelly_theorique * 100) * KELLY_COURANT, 2)
                     mise_u = min(mise_u, 5.0)
 
                     if mise_u < 0.1: continue
 
                     badge = "✅ *XI CONFIRMÉ*" if lineup_ok else "⏳ *Compo Probable*"
-                    market_label = "⚽ BUTS" if market_key == 'totals' else "🏆 HANDICAP"
+                    market_label = "🏆 HANDICAP"
+                    rotation_note = f"\n⚠️ {alerte_lineup_text}" if alerte_lineup_text else ""
 
                     msg = (f"🎯 *SIGNAL [{ligue['nom']}] {market_label}*\n"
-                           f"🏟️ {n_d} - {n_e}\n{badge} | {hko_label}\n"
+                           f"🏟️ {n_d} - {n_e}\n{badge} | {hko_label}{rotation_note}\n"
                            f"💎 Pari : *{pari_nom_display}* @ {cote:.2f}\n"
                            f"🔥 Value : *+{ev_final:.1%}* (Mod: {ev_modele:+.1%} | Pin: {ev_pinnacle:+.1%})\n"
                            f"📏 Mise Kelly : *{mise_u} u*")
@@ -1504,12 +1555,17 @@ async def analyser_un_match(session, m, ligue, saison_correcte, sos_map, mot_map
 # ==========================================
 # 🚀 5. FONCTIONS MATHS & xG
 # ==========================================
-async def obtenir_xg_moyenne_async(session, team_id, l_id, saison_actuelle, sos_map, ligue_avg, venue='all'):
+async def obtenir_xg_moyenne_async(session, team_id, l_id, saison_actuelle, sos_map, ligue_avg, venue='all', ligue_avg_def=None):
     """
     Moteur Hybride : Gère le passage de témoin entre la saison passée et actuelle,
     applique un shrinkage bayésien et une décroissance temporelle basée sur les jours réels.
+    ligue_avg     : moyenne buts MARQUÉS par match (cible shrinkage offensif)
+    ligue_avg_def : moyenne buts ENCAISSÉS par match (cible shrinkage défensif)
+                    Si None → utilise ligue_avg (compatibilité ascendante).
     Retourne (xg_off, xg_def, n_matchs_utilises).
     """
+    if ligue_avg_def is None:
+        ligue_avg_def = ligue_avg
     url_n = f"{URL_FOOTBALL}/fixtures?team={team_id}&league={l_id}&season={saison_actuelle}&status=FT"
     data_n = await fetch_async(session, url_n, HEADERS_FB)
     matchs_n = data_n['response'] if data_n else []
@@ -1622,7 +1678,7 @@ async def obtenir_xg_moyenne_async(session, team_id, l_id, saison_actuelle, sos_
     w_ligue  = 1.0 - w_equipe
 
     xg_off = w_equipe * xg_off_brut + w_ligue * ligue_avg
-    xg_def = w_equipe * xg_def_brut + w_ligue * ligue_avg
+    xg_def = w_equipe * xg_def_brut + w_ligue * ligue_avg_def
 
     return (xg_off, xg_def, n)
 
@@ -1669,7 +1725,7 @@ async def actualiser_stats_ligue(session, ligue_cfg, season):
         if len(standings) < 10:
             avg = ligue_cfg.get('avg_goals', 1.3)
             return ({t['team']['id']: avg for t in standings},
-                    {t['team']['id']: 1.0 for t in standings}, {}, {}, avg, avg * 0.85)
+                    {t['team']['id']: 1.0 for t in standings}, {}, avg, avg * 0.85)
 
         pts_c1 = standings[min(ligue_cfg['c1']-1, len(standings)-1)]['points']
         pts_rel = standings[min(ligue_cfg['rel']-1, len(standings)-1)]['points']
@@ -1681,16 +1737,12 @@ async def actualiser_stats_ligue(session, ligue_cfg, season):
         league_avg_gf = (m_dom_l + m_ext_l) / 2
         league_avg_ga = sum(t['all']['goals']['against'] for t in standings) / (sum(t['all']['played'] for t in standings) or 1)
 
-        sos, mot, bias, luck = {}, {}, {}, {}
+        sos, mot, luck = {}, {}, {}
         for team in standings:
             t_id = team['team']['id']
             j = team['all']['played'] or 1
             d = min(abs(team['points'] - pts_c1), abs(team['points'] - pts_rel))
             mot[t_id] = 1.0 + (0.10 * (1/(d+1))) if d <= 4 else (0.95 if d > 12 else 1.0)
-
-            hb = (team['home']['goals']['for'] / (team['home']['played'] or 1)) / (m_dom_l or 1)
-            ab = (team['away']['goals']['for'] / (team['away']['played'] or 1)) / (m_ext_l or 1)
-            bias[t_id] = {'home': 1.0 + (hb - 1.0) * 0.5, 'away': 1.0 + (ab - 1.0) * 0.5}
             sos[t_id] = team['all']['goals']['against'] / j
 
             # PDO-proxy : combine sur-performance offensive ET défensive
@@ -1702,7 +1754,7 @@ async def actualiser_stats_ligue(session, ligue_cfg, season):
             pdo = (gf_ratio + (2.0 - ga_ratio)) / 2.0
             luck[t_id] = 1.0 - (pdo - 1.0) * 0.30
 
-        resultat = (sos, mot, bias, luck, m_dom_l, m_ext_l)
+        resultat = (sos, mot, luck, m_dom_l, m_ext_l)
 
         # --- ρ DYNAMIQUE : estimation MLE saison courante ---
         # Lance en tâche de fond pour ne pas bloquer le scan si < 30 matchs.
@@ -2075,12 +2127,36 @@ async def main_loop():
 
     log_info("🚀 Démarrage du Superviseur Sniper Football V25 Gold (aiosqlite)...")
 
-    # Détection unique de la couverture xG au démarrage (retesté automatiquement tous les 30j)
+    # Détection initiale de la couverture xG + collecte historique des scores
+    dernier_retest_xg = None
+    dernier_collecte_scores = None
     async with aiohttp.ClientSession() as session:
         await detecter_ligues_sans_xg(session)
+        for lg in CHAMPIONNATS:
+            await collecter_scores_historiques(session, lg, obtenir_saison_api(lg['nom']))
+    dernier_retest_xg = datetime.now(timezone.utc)
+    dernier_collecte_scores = datetime.now(timezone.utc)
 
     while True:
         try:
+            maintenant = datetime.now(timezone.utc)
+
+            # Retest quotidien xG : si une ligue commence à fournir des xG en cours de saison,
+            # le bot le détecte sans redémarrage.
+            if dernier_retest_xg is None or (maintenant - dernier_retest_xg).total_seconds() > 86400:
+                async with aiohttp.ClientSession() as session:
+                    await detecter_ligues_sans_xg(session)
+                dernier_retest_xg = maintenant
+                log_info("🔄 Retest couverture xG par ligue effectué.")
+
+            # Collecte quotidienne des scores FT pour alimenter l'estimation MLE de ρ
+            if dernier_collecte_scores is None or (maintenant - dernier_collecte_scores).total_seconds() > 86400:
+                async with aiohttp.ClientSession() as session:
+                    for lg in CHAMPIONNATS:
+                        await collecter_scores_historiques(session, lg, obtenir_saison_api(lg['nom']))
+                dernier_collecte_scores = maintenant
+                log_info("📊 Collecte quotidienne des scores FT terminée.")
+
             matchs = await lancer_scan_global_async()
             pause = calculer_pause(matchs)
             pause_label = f"{pause//60} min" if pause >= 60 else f"{pause}s"
@@ -2091,5 +2167,28 @@ async def main_loop():
             log_info(f"⚠️ Erreur Critique : {e}")
             await asyncio.sleep(60)
 
+async def _graceful_shutdown(sig_name: str):
+    """Ferme la connexion DB proprement avant de quitter."""
+    log_info(f"🛑 Signal {sig_name} reçu — fermeture propre en cours...")
+    if db_conn:
+        await db_conn.close()
+        log_info("💾 Connexion DB fermée.")
+    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    for t in tasks:
+        t.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
+    asyncio.get_event_loop().stop()
+
+
 if __name__ == "__main__":
-    asyncio.run(main_loop())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, lambda s=sig: asyncio.ensure_future(_graceful_shutdown(s.name)))
+        except NotImplementedError:
+            pass  # Windows ne supporte pas add_signal_handler — shutdown propre ignoré
+    try:
+        loop.run_until_complete(main_loop())
+    finally:
+        loop.close()
