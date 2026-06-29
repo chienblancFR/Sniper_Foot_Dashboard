@@ -368,12 +368,16 @@ async def collecter_odds_historiques(conn, session, ligue, date_utc, table, fixt
     Un seul appel API couvre tous les matchs de la ligue à cette date.
     """
     date_str = date_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
-    url = (f"https://api.the-odds-api.com/v4/sports/{ligue['key']}/odds-history/"
+    url = (f"https://api.the-odds-api.com/v4/historical/sports/{ligue['key']}/odds"
            f"?apiKey={API_ODDS_KEY}&regions=eu&markets=spreads,totals"
            f"&oddsFormat=decimal&bookmakers=pinnacle&date={date_str}")
 
-    data = await fetch(session, url)
-    if not data or not isinstance(data, list):
+    raw = await fetch(session, url)
+    if not raw:
+        return
+    # L'endpoint /v4/historical/ enveloppe les résultats dans {"timestamp":..., "data":[...]}
+    data = raw.get('data', raw) if isinstance(raw, dict) else raw
+    if not isinstance(data, list) or not data:
         return
 
     for event in data:
@@ -539,6 +543,23 @@ async def simuler_paris(conn):
     print("🔬  PHASE 2 — SIMULATION DU MODÈLE")
     print("="*60)
 
+    # Diagnostics rapides pour détecter les problèmes de collecte
+    async with conn.execute("SELECT COUNT(*) FROM bt_fixtures WHERE gh IS NOT NULL") as cur:
+        n_fix = (await cur.fetchone())[0]
+    async with conn.execute("SELECT COUNT(*) FROM bt_odds_h24") as cur:
+        n_odds = (await cur.fetchone())[0]
+    async with conn.execute("SELECT COUNT(*) FROM bt_xg") as cur:
+        n_xg = (await cur.fetchone())[0]
+    print(f"  📋 Fixtures avec résultat : {n_fix}")
+    print(f"  📊 Cotes H-24 en base     : {n_odds}")
+    print(f"  🎯 Entrées xG en base     : {n_xg}")
+
+    if n_odds == 0:
+        print("\n  ⚠️  AUCUNE cote H-24 trouvée — la collecte d'odds a échoué.")
+        print("  💡 Vérifiez API_ODDS_KEY et que votre plan inclut l'endpoint /v4/historical/")
+        print("\n✅ Phase 2 terminée (0 signaux).")
+        return
+
     for ligue in CHAMPIONNATS:
         async with conn.execute(
             "SELECT id, saison, date_utc, home_id, away_id, home_name, away_name, gh, ga "
@@ -639,22 +660,15 @@ async def generer_rapport(conn):
     print("📊  PHASE 3 — RAPPORT D'ANALYSE")
     print("="*60)
 
-    async with conn.execute("""
-        SELECT s.*, l.nom as ligue_nom
-        FROM bt_signaux s
-        JOIN (SELECT DISTINCT id, nom FROM
-             (SELECT id, nom FROM (VALUES
-               (140,'La Liga'),(78,'Bundesliga'),(88,'Eredivisie'),
-               (135,'Serie A'),(94,'Primeira Liga'),(203,'Süper Lig'),
-               (113,'Allsvenskan'),(71,'Série A Brésil'),(61,'Ligue 1'),
-               (141,'LaLiga 2'),(39,'Premier League'),(40,'Championship'),
-               (253,'MLS'),(103,'Eliteserien'),(144,'Jupiler Pro'),(136,'Serie B')
-             ) AS t(id, nom))
-        ) l ON l.id = s.ligue_id
-        WHERE s.resultat IS NOT NULL
-        ORDER BY s.ligue_id, s.saison
-    """) as cur:
-        signaux = await cur.fetchall()
+    nom_par_id = {c['id']: c['nom'] for c in CHAMPIONNATS}
+
+    async with conn.execute(
+        "SELECT * FROM bt_signaux WHERE resultat IS NOT NULL ORDER BY ligue_id, saison"
+    ) as cur:
+        rows = await cur.fetchall()
+
+    # Ajouter le nom de la ligue en fin de tuple (compatible avec toutes versions SQLite)
+    signaux = [(*r, nom_par_id.get(r[1], str(r[1]))) for r in rows]
 
     if not signaux:
         print("⚠️  Aucun signal trouvé. Lancez d'abord --collect et --simulate.")
