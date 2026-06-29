@@ -1244,7 +1244,32 @@ async def analyser_un_match(session, m, ligue, saison_correcte, sos_map, mot_map
     # 🎯 LE FILTRE TEMPOREL : Le Sniper ne s'active qu'à partir de H-36
     if not (0.9 <= hr <= 36.0): return
 
-    poids_dyn = 0.15 + (0.15) * (min(1.0, hr / 168.0))
+    # poids_dyn calibré sur la fenêtre réelle [0.9h, 36h] du bot.
+    # L'ancienne formule (hr/168) produisait une variation de 15.1% à 18.2% — trop étroite.
+    # Nouvelle plage : 10% (H-0.9, marché très sharp) → 30% (H-36, signal modèle plus libre).
+    poids_dyn = 0.10 + 0.20 * min(1.0, (hr - 0.9) / (36.0 - 0.9))
+
+    # 🕐 EV MINIMUM GRADUÉ SELON L'HEURE AU KO
+    # Plus on se rapproche du coup d'envoi, plus Pinnacle a intégré l'information
+    # (compositions, blessures de dernière minute, mouvements sharp).
+    # On compense en exigeant un edge plus élevé pour valider le pari.
+    #   H > 6  → seuil normal   (modèle pertinent, peu d'info de dernière minute)
+    #   H 3-6  → +1.5%          (premiers mouvements pré-KO, compositions probables)
+    #   H < 3  → +3%            (compositions diffusées, marché au plus serré)
+    if hr < 3.0:
+        ev_min_effectif = ligue['ev_min'] + 0.03
+    elif hr < 6.0:
+        ev_min_effectif = ligue['ev_min'] + 0.015
+    else:
+        ev_min_effectif = ligue['ev_min']
+
+    # Label H-KO pour transparence dans les alertes Telegram
+    if hr < 3.0:
+        hko_label = f"🔴 H-{hr:.1f} (marché serré +3%)"
+    elif hr < 6.0:
+        hko_label = f"🟡 H-{hr:.1f} (pré-KO +1.5%)"
+    else:
+        hko_label = f"🟢 H-{hr:.1f}"
 
     n_d_m = NAME_MAPPING.get(n_d, n_d)
     n_e_m = NAME_MAPPING.get(n_e, n_e)
@@ -1419,7 +1444,7 @@ async def analyser_un_match(session, m, ligue, saison_correcte, sos_map, mot_map
                     ev_pinnacle = calculer_ev_total_asiatique(mat, h, is_over, cote_novig)
                 ev_final = (ev_modele * poids_dyn) + (ev_pinnacle * (1 - poids_dyn))
 
-                if ligue['ev_min'] <= ev_final <= ligue['ev_max']:
+                if ev_min_effectif <= ev_final <= ligue['ev_max']:
                     # Kelly exact pour AH/Total : approximation mean-variance f*=E[X]/E[X²]
                     # Corrige le sous-dimensionnement du Kelly binaire sur les paris à 5 issues
                     if market_key == 'spreads':
@@ -1435,7 +1460,7 @@ async def analyser_un_match(session, m, ligue, saison_correcte, sos_map, mot_map
                     market_label = "⚽ BUTS" if market_key == 'totals' else "🏆 HANDICAP"
 
                     msg = (f"🎯 *SIGNAL [{ligue['nom']}] {market_label}*\n"
-                           f"🏟️ {n_d} - {n_e}\n{badge}\n"
+                           f"🏟️ {n_d} - {n_e}\n{badge} | {hko_label}\n"
                            f"💎 Pari : *{pari_nom_display}* @ {cote:.2f}\n"
                            f"🔥 Value : *+{ev_final:.1%}* (Mod: {ev_modele:+.1%} | Pin: {ev_pinnacle:+.1%})\n"
                            f"📏 Mise Kelly : *{mise_u} u*")
