@@ -221,8 +221,33 @@ with tab_live:
     st.markdown("---")
     st.subheader("📡 Radar Football : Signaux Actifs / En attente de dénouement")
     if not df_attente.empty:
+        df_att_display = df_attente.copy()
+
+        # CLV temps réel : colorée si disponible
         colonnes_attente = ["Date", "Nom_Ligue", "Equipe", "Handicap", "Cote_Prise", "Mise", "Edge"]
-        st.dataframe(df_attente[colonnes_attente].sort_values("Date"), use_container_width=True)
+        if "CLV" in df_att_display.columns:
+            colonnes_attente.append("CLV")
+            df_att_display["CLV"] = (df_att_display["CLV"] * 100).round(2)
+            df_att_display = df_att_display.rename(columns={"CLV": "CLV (%)"})
+            colonnes_attente[-1] = "CLV (%)"
+
+        def style_clv(val):
+            try:
+                v = float(val)
+                if v > 1:   return 'color: #00FF00; font-weight: bold'
+                if v < -1:  return 'color: #FF4500; font-weight: bold'
+                return 'color: #FFD700'
+            except Exception:
+                return ''
+
+        df_sorted = df_att_display[colonnes_attente].sort_values("Date")
+        if "CLV (%)" in colonnes_attente:
+            st.dataframe(
+                df_sorted.style.map(style_clv, subset=["CLV (%)"]),
+                use_container_width=True
+            )
+        else:
+            st.dataframe(df_sorted, use_container_width=True)
     else:
         st.success("Aucun ordre en cours sur les marchés. Le Sniper est en veille.")
 
