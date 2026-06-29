@@ -63,7 +63,7 @@ RHO_PAR_LIGUE = {
     203: -0.08, 71: -0.08, 113: -0.11, 103: -0.10, 144: -0.12, 253: -0.09,
 }
 RHO_DEFAULT  = -0.12
-KELLY_FRAC   = 0.10
+KELLY_FRAC   = 0.05   # réduit à 5% — adapté au niveau d'edge réel du modèle
 EV_MIN       = 0.08   # relevé à 8% pour plus de sélectivité (était 5%)
 EV_MAX       = 0.20
 MIN_COTE     = 1.70   # ignorer les handicaps trop courts (< 1.70)
@@ -511,15 +511,27 @@ async def phase_collecte(conn, session):
 # ─────────────────────────────────────────────────────────────
 # 🔬  PHASE 2 — SIMULATION DU MODÈLE
 # ─────────────────────────────────────────────────────────────
-async def reconstruire_xg_equipe(conn, team_id, ligue_id, avant_date, saison):
+async def reconstruire_xg_equipe(conn, team_id, ligue_id, avant_date, saison, venue='all'):
     """
     Calcule le xG moyen de l'équipe en utilisant UNIQUEMENT les matchs
     joués AVANT avant_date. Réplique la logique du bot principal :
+    - split home/away (venue='home'|'away'|'all')
     - decay exponentiel (demi-vie 46j)
     - shrinkage bayésien
     - fallback saison précédente si < 10 matchs
+    Retourne (xg_off, xg_def, n_matchs).
     """
-    async with conn.execute("""
+    if venue == 'home':
+        venue_filter = "AND f.home_id = ?"
+        params = (team_id, ligue_id, saison, saison - 1, avant_date, team_id)
+    elif venue == 'away':
+        venue_filter = "AND f.away_id = ?"
+        params = (team_id, ligue_id, saison, saison - 1, avant_date, team_id)
+    else:
+        venue_filter = ""
+        params = (team_id, ligue_id, saison, saison - 1, avant_date)
+
+    async with conn.execute(f"""
         SELECT f.id, f.date_utc, x.xg_p, x.xg_c, f.home_id, f.away_id, f.saison
         FROM bt_fixtures f
         JOIN bt_xg x ON x.fixture_id = f.id AND x.team_id = ?
@@ -527,10 +539,15 @@ async def reconstruire_xg_equipe(conn, team_id, ligue_id, avant_date, saison):
           AND f.saison IN (?, ?)
           AND f.date_utc < ?
           AND f.gh IS NOT NULL
+          {venue_filter}
         ORDER BY f.date_utc DESC
         LIMIT 15
-    """, (team_id, ligue_id, saison, saison - 1, avant_date)) as cur:
+    """, params) as cur:
         rows = await cur.fetchall()
+
+    # Fallback sur toutes les venues si < 5 matchs dans le venue demandé
+    if len(rows) < 5 and venue != 'all':
+        return await reconstruire_xg_equipe(conn, team_id, ligue_id, avant_date, saison, venue='all')
 
     if len(rows) < 5:
         return 1.3, 1.1, len(rows)  # Promu / données insuffisantes
@@ -606,16 +623,19 @@ async def simuler_paris(conn):
             if not odds_h24:
                 continue
 
-            # Reconstituer xG AVANT ce match
-            xg_off_d, xg_def_d, _ = await reconstruire_xg_equipe(
-                conn, h_id, ligue['id'], date_utc, saison
+            # Reconstituer xG AVANT ce match — split home/away comme le bot principal
+            xg_off_d, xg_def_d, n_d = await reconstruire_xg_equipe(
+                conn, h_id, ligue['id'], date_utc, saison, venue='home'
             )
-            xg_off_e, xg_def_e, _ = await reconstruire_xg_equipe(
-                conn, a_id, ligue['id'], date_utc, saison
+            xg_off_e, xg_def_e, n_e = await reconstruire_xg_equipe(
+                conn, a_id, ligue['id'], date_utc, saison, venue='away'
             )
 
-            # Paramètres Poisson Dixon-Coles
-            # Normalisation simple (pas de standings reconstitués pour simplifier)
+            # Filtre : ignorer si l'une des équipes manque d'historique suffisant
+            if n_d < 8 or n_e < 8:
+                continue
+
+            # Paramètres Poisson Dixon-Coles avec avantage domicile implicite via split venue
             L_A = max(0.4, (xg_off_d + xg_def_e) / 2)
             L_B = max(0.4, (xg_off_e + xg_def_d) / 2)
 

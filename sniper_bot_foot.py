@@ -82,8 +82,8 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 API_METEO_KEY = os.getenv("OPENWEATHER_KEY")
 
-KELLY_FRAC = 0.10       # Fraction Kelly de base (ajustée dynamiquement selon le drawdown)
-KELLY_COURANT = 0.10   # Mise à jour chaque cycle par actualiser_kelly_adaptatif()
+KELLY_FRAC = 0.05       # Fraction Kelly de base (ajustée dynamiquement selon le drawdown)
+KELLY_COURANT = 0.05   # Mise à jour chaque cycle par actualiser_kelly_adaptatif()
 
 # Ligues confirmées sans xG via auto-détection (voir detecter_ligues_sans_xg).
 # Ce set est peuplé dynamiquement au démarrage — les valeurs ci-dessous sont
@@ -1014,11 +1014,11 @@ async def actualiser_kelly_adaptatif():
         drawdown = (peak - bankroll) / peak if peak > 0 else 0.0
 
         if drawdown > 0.15:
-            KELLY_COURANT = 0.05
-            log_info(f"⚠️ Kelly réduit à 0.05 — Drawdown critique : {drawdown:.1%}")
+            KELLY_COURANT = 0.025
+            log_info(f"⚠️ Kelly réduit à 0.025 — Drawdown critique : {drawdown:.1%}")
         elif drawdown > 0.08:
-            KELLY_COURANT = 0.07
-            log_info(f"⚠️ Kelly réduit à 0.07 — Drawdown modéré : {drawdown:.1%}")
+            KELLY_COURANT = 0.035
+            log_info(f"⚠️ Kelly réduit à 0.035 — Drawdown modéré : {drawdown:.1%}")
         else:
             KELLY_COURANT = KELLY_FRAC
     except Exception as e:
