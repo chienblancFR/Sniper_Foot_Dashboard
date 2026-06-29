@@ -253,232 +253,227 @@ with tab_backtest:
             "Aucun fichier `backtest_results.csv` trouvé. "
             "Lance `python backtest_football.py` pour générer les données."
         )
-        st.stop()
     elif statut_bt in ("error", "empty"):
         st.error("Erreur lors du chargement des données de back-test.")
-        st.stop()
+    else:
+        # ── Filtres sidebar back-test ─────────────────────────────
+        st.sidebar.markdown("---")
+        st.sidebar.header("🔬 Filtres Back-test")
 
-    # ── Filtres sidebar back-test ─────────────────────────────
-    st.sidebar.markdown("---")
-    st.sidebar.header("🔬 Filtres Back-test")
+        saisons_dispo = sorted(df_bt['saison'].unique().tolist())
+        saisons_choisies = st.sidebar.multiselect(
+            "📅 Saison(s) :", saisons_dispo, default=saisons_dispo
+        )
+        if saisons_choisies:
+            df_bt = df_bt[df_bt['saison'].isin(saisons_choisies)]
 
-    saisons_dispo = sorted(df_bt['saison'].unique().tolist())
-    saisons_choisies = st.sidebar.multiselect(
-        "📅 Saison(s) :", saisons_dispo, default=saisons_dispo
-    )
-    if saisons_choisies:
-        df_bt = df_bt[df_bt['saison'].isin(saisons_choisies)]
+        ligues_bt = sorted(df_bt['Nom_Ligue'].unique().tolist())
+        ligue_bt = st.sidebar.selectbox("🏆 Ligue :", ["Toutes"] + ligues_bt, key="bt_ligue")
+        if ligue_bt != "Toutes":
+            df_bt = df_bt[df_bt['Nom_Ligue'] == ligue_bt]
 
-    ligues_bt = sorted(df_bt['Nom_Ligue'].unique().tolist())
-    ligue_bt = st.sidebar.selectbox("🏆 Ligue :", ["Toutes"] + ligues_bt, key="bt_ligue")
-    if ligue_bt != "Toutes":
-        df_bt = df_bt[df_bt['Nom_Ligue'] == ligue_bt]
+        marche_bt = st.sidebar.selectbox(
+            "📊 Marché :", ["Tous", "Handicap Asiatique", "Totaux (Buts)"], key="bt_marche"
+        )
+        if marche_bt != "Tous":
+            df_bt = df_bt[df_bt['Type_Marche'] == marche_bt]
 
-    marche_bt = st.sidebar.selectbox(
-        "📊 Marché :", ["Tous", "Handicap Asiatique", "Totaux (Buts)"], key="bt_marche"
-    )
-    if marche_bt != "Tous":
-        df_bt = df_bt[df_bt['Type_Marche'] == marche_bt]
+        # Séparer résultats résolus / en attente
+        df_bt_res = df_bt[df_bt['resultat'].notna()].copy()
+        df_bt_clv = df_bt_res[df_bt_res['clv'].notna()].copy()
 
-    # Séparer résultats résolus / en attente
-    df_bt_res  = df_bt[df_bt['resultat'].notna()].copy()
-    df_bt_clv  = df_bt_res[df_bt_res['clv'].notna()].copy()
+        # ── KPIs ─────────────────────────────────────────────────
+        st.subheader("📊 Vue d'ensemble — Back-test Dixon-Coles")
 
-    # ── KPIs ─────────────────────────────────────────────────
-    st.subheader("📊 Vue d'ensemble — Back-test Dixon-Coles")
+        total_signaux = len(df_bt_res)
+        total_pnl     = df_bt_res['resultat'].sum()
+        total_mise_bt = df_bt_res['mise'].sum()
+        roi_bt        = (total_pnl / total_mise_bt * 100) if total_mise_bt > 0 else 0
+        clv_moy       = df_bt_clv['clv'].mean() * 100 if not df_bt_clv.empty else 0
+        wins_bt       = (df_bt_res['resultat'] > 0).sum()
+        wr_bt         = (wins_bt / total_signaux * 100) if total_signaux > 0 else 0
 
-    total_signaux = len(df_bt_res)
-    total_pnl     = df_bt_res['resultat'].sum()
-    total_mise_bt = df_bt_res['mise'].sum()
-    roi_bt        = (total_pnl / total_mise_bt * 100) if total_mise_bt > 0 else 0
-    clv_moy       = df_bt_clv['clv'].mean() * 100 if not df_bt_clv.empty else 0
-    wins_bt       = (df_bt_res['resultat'] > 0).sum()
-    wr_bt         = (wins_bt / total_signaux * 100) if total_signaux > 0 else 0
+        cumul = df_bt_res['resultat'].cumsum()
+        peak  = cumul.cummax()
+        dd    = ((peak - cumul) / (CAPITAL_INITIAL + peak)).max() * 100 if not cumul.empty else 0
 
-    # Drawdown sur le backtest
-    cumul = df_bt_res['resultat'].cumsum()
-    peak  = cumul.cummax()
-    dd    = ((peak - cumul) / (CAPITAL_INITIAL + peak)).max() * 100 if not cumul.empty else 0
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Signaux générés",  f"{total_signaux}")
+        c2.metric("P&L total",        f"{total_pnl:+.1f} u")
+        c3.metric("ROI",              f"{roi_bt:+.2f} %")
+        c4.metric("CLV moyen",        f"{clv_moy:+.2f} %")
+        c5.metric("Max Drawdown",     f"{dd:.1f} %")
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Signaux générés",  f"{total_signaux}")
-    c2.metric("P&L total",        f"{total_pnl:+.1f} u")
-    c3.metric("ROI",              f"{roi_bt:+.2f} %")
-    c4.metric("CLV moyen",        f"{clv_moy:+.2f} %")
-    c5.metric("Max Drawdown",     f"{dd:.1f} %")
+        st.markdown("---")
+        col_a, col_b = st.columns(2)
 
-    st.markdown("---")
-
-    col_a, col_b = st.columns(2)
-
-    # ── Courbe de bankroll back-test ──────────────────────────
-    with col_a:
-        st.subheader("📈 Courbe de Capital (Back-test)")
-        if not df_bt_res.empty:
-            df_curve = df_bt_res.reset_index(drop=True).copy()
-            df_curve['Bankroll'] = CAPITAL_INITIAL + df_curve['resultat'].cumsum()
-            fig_bt_bank = go.Figure()
-            fig_bt_bank.add_trace(go.Scatter(
-                x=df_curve.index, y=df_curve['Bankroll'],
-                mode='lines', fill='tozeroy',
-                line=dict(color='#00BFFF', width=2),
-                fillcolor='rgba(0,191,255,0.1)',
-                name='Bankroll simulée'
-            ))
-            fig_bt_bank.add_hline(y=CAPITAL_INITIAL, line_dash="dash", line_color="#FFFFFF", opacity=0.4)
-            fig_bt_bank.update_layout(
-                yaxis_title="Capital (unités)",
-                xaxis_title="Paris (ordre chronologique)",
-                showlegend=False
-            )
-            appliquer_theme_dark(fig_bt_bank)
-            st.plotly_chart(fig_bt_bank, use_container_width=True)
-        else:
-            st.info("Aucune donnée à afficher.")
-
-    # ── ROI par ligue ─────────────────────────────────────────
-    with col_b:
-        st.subheader("🏆 ROI & CLV par Ligue")
-        if not df_bt_res.empty:
-            grp = df_bt_res.groupby('Nom_Ligue').agg(
-                PnL=('resultat', 'sum'),
-                Mise=('mise', 'sum'),
-                N=('resultat', 'count')
-            ).reset_index()
-            grp['ROI'] = grp['PnL'] / grp['Mise'] * 100
-            grp_clv = df_bt_clv.groupby('Nom_Ligue')['clv'].mean().reset_index()
-            grp_clv.columns = ['Nom_Ligue', 'CLV_moy']
-            grp = grp.merge(grp_clv, on='Nom_Ligue', how='left')
-            grp = grp.sort_values('ROI', ascending=True)
-
-            fig_roi = go.Figure()
-            fig_roi.add_trace(go.Bar(
-                y=grp['Nom_Ligue'], x=grp['ROI'],
-                orientation='h',
-                marker_color=['#00FF00' if v >= 0 else '#FF4500' for v in grp['ROI']],
-                name='ROI (%)',
-                text=[f"{v:+.1f}%" for v in grp['ROI']],
-                textposition='outside'
-            ))
-            if 'CLV_moy' in grp.columns:
-                fig_roi.add_trace(go.Scatter(
-                    y=grp['Nom_Ligue'], x=grp['CLV_moy'] * 100,
-                    mode='markers',
-                    marker=dict(color='#FFD700', size=10, symbol='diamond'),
-                    name='CLV moyen (%)'
+        # ── Courbe de bankroll back-test ──────────────────────────
+        with col_a:
+            st.subheader("📈 Courbe de Capital (Back-test)")
+            if not df_bt_res.empty:
+                df_curve = df_bt_res.reset_index(drop=True).copy()
+                df_curve['Bankroll'] = CAPITAL_INITIAL + df_curve['resultat'].cumsum()
+                fig_bt_bank = go.Figure()
+                fig_bt_bank.add_trace(go.Scatter(
+                    x=df_curve.index, y=df_curve['Bankroll'],
+                    mode='lines', fill='tozeroy',
+                    line=dict(color='#00BFFF', width=2),
+                    fillcolor='rgba(0,191,255,0.1)',
+                    name='Bankroll simulée'
                 ))
-            fig_roi.add_vline(x=0, line_dash="dash", line_color="#FFFFFF", opacity=0.5)
-            fig_roi.update_layout(
-                xaxis_title="ROI / CLV (%)",
-                height=480,
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-            )
-            appliquer_theme_dark(fig_roi)
-            st.plotly_chart(fig_roi, use_container_width=True)
-        else:
-            st.info("Aucune donnée à afficher.")
+                fig_bt_bank.add_hline(y=CAPITAL_INITIAL, line_dash="dash", line_color="#FFFFFF", opacity=0.4)
+                fig_bt_bank.update_layout(
+                    yaxis_title="Capital (unités)",
+                    xaxis_title="Paris (ordre chronologique)",
+                    showlegend=False
+                )
+                appliquer_theme_dark(fig_bt_bank)
+                st.plotly_chart(fig_bt_bank, use_container_width=True)
+            else:
+                st.info("Aucune donnée à afficher.")
 
-    st.markdown("---")
+        # ── ROI par ligue ─────────────────────────────────────────
+        with col_b:
+            st.subheader("🏆 ROI & CLV par Ligue")
+            if not df_bt_res.empty:
+                grp = df_bt_res.groupby('Nom_Ligue').agg(
+                    PnL=('resultat', 'sum'),
+                    Mise=('mise', 'sum'),
+                    N=('resultat', 'count')
+                ).reset_index()
+                grp['ROI'] = grp['PnL'] / grp['Mise'] * 100
+                grp_clv = df_bt_clv.groupby('Nom_Ligue')['clv'].mean().reset_index()
+                grp_clv.columns = ['Nom_Ligue', 'CLV_moy']
+                grp = grp.merge(grp_clv, on='Nom_Ligue', how='left')
+                grp = grp.sort_values('ROI', ascending=True)
 
-    col_c, col_d = st.columns(2)
-
-    # ── Calibration EV ────────────────────────────────────────
-    with col_c:
-        st.subheader("🎯 Calibration du Modèle")
-        st.caption("Fréquence de victoire réelle vs EV détecté — un modèle bien calibré doit suivre la droite.")
-        if not df_bt_res.empty and 'ev_modele' in df_bt_res.columns:
-            tranches = [
-                (0.05, 0.07, "5-7%"),
-                (0.07, 0.09, "7-9%"),
-                (0.09, 0.12, "9-12%"),
-                (0.12, 0.20, "12-20%"),
-            ]
-            calib_rows = []
-            for lo, hi, label in tranches:
-                sub = df_bt_res[(df_bt_res['ev_modele'] >= lo) & (df_bt_res['ev_modele'] < hi)]
-                sub_actif = sub[sub['resultat'] != 0]
-                if sub_actif.empty:
-                    continue
-                wr_reel   = (sub_actif['resultat'] > 0).mean() * 100
-                ev_moy    = sub['ev_modele'].mean() * 100
-                calib_rows.append({'Tranche': label, 'Win_Rate_Reel': wr_reel, 'EV_Moyen': ev_moy, 'N': len(sub)})
-
-            if calib_rows:
-                df_calib = pd.DataFrame(calib_rows)
-                fig_cal = go.Figure()
-                fig_cal.add_trace(go.Bar(
-                    x=df_calib['Tranche'], y=df_calib['Win_Rate_Reel'],
-                    marker_color='#00BFFF', name='Win Rate réel (%)',
-                    text=[f"{v:.1f}%<br>n={n}" for v, n in zip(df_calib['Win_Rate_Reel'], df_calib['N'])],
+                fig_roi = go.Figure()
+                fig_roi.add_trace(go.Bar(
+                    y=grp['Nom_Ligue'], x=grp['ROI'],
+                    orientation='h',
+                    marker_color=['#00FF00' if v >= 0 else '#FF4500' for v in grp['ROI']],
+                    name='ROI (%)',
+                    text=[f"{v:+.1f}%" for v in grp['ROI']],
                     textposition='outside'
                 ))
-                fig_cal.add_hline(y=50, line_dash="dot", line_color="#FFD700",
-                                  annotation_text="50% (neutre)", annotation_position="bottom right")
-                fig_cal.update_layout(
-                    yaxis_title="Fréquence de victoire (%)",
-                    xaxis_title="Tranche d'EV détecté",
-                    yaxis_range=[0, 100]
+                if 'CLV_moy' in grp.columns:
+                    fig_roi.add_trace(go.Scatter(
+                        y=grp['Nom_Ligue'], x=grp['CLV_moy'] * 100,
+                        mode='markers',
+                        marker=dict(color='#FFD700', size=10, symbol='diamond'),
+                        name='CLV moyen (%)'
+                    ))
+                fig_roi.add_vline(x=0, line_dash="dash", line_color="#FFFFFF", opacity=0.5)
+                fig_roi.update_layout(
+                    xaxis_title="ROI / CLV (%)",
+                    height=480,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
-                appliquer_theme_dark(fig_cal)
-                st.plotly_chart(fig_cal, use_container_width=True)
+                appliquer_theme_dark(fig_roi)
+                st.plotly_chart(fig_roi, use_container_width=True)
             else:
-                st.info("Données insuffisantes pour la calibration.")
-        else:
-            st.info("Colonne `ev_modele` non trouvée dans le CSV.")
+                st.info("Aucune donnée à afficher.")
 
-    # ── P&L par marché ────────────────────────────────────────
-    with col_d:
-        st.subheader("📊 P&L par Marché")
+        st.markdown("---")
+        col_c, col_d = st.columns(2)
+
+        # ── Calibration EV ────────────────────────────────────────
+        with col_c:
+            st.subheader("🎯 Calibration du Modèle")
+            st.caption("Fréquence de victoire réelle vs EV détecté — un modèle bien calibré doit suivre la droite.")
+            if not df_bt_res.empty and 'ev_modele' in df_bt_res.columns:
+                tranches = [
+                    (0.05, 0.07, "5-7%"),
+                    (0.07, 0.09, "7-9%"),
+                    (0.09, 0.12, "9-12%"),
+                    (0.12, 0.20, "12-20%"),
+                ]
+                calib_rows = []
+                for lo, hi, label in tranches:
+                    sub = df_bt_res[(df_bt_res['ev_modele'] >= lo) & (df_bt_res['ev_modele'] < hi)]
+                    sub_actif = sub[sub['resultat'] != 0]
+                    if sub_actif.empty:
+                        continue
+                    wr_reel = (sub_actif['resultat'] > 0).mean() * 100
+                    ev_moy  = sub['ev_modele'].mean() * 100
+                    calib_rows.append({'Tranche': label, 'Win_Rate_Reel': wr_reel, 'EV_Moyen': ev_moy, 'N': len(sub)})
+
+                if calib_rows:
+                    df_calib = pd.DataFrame(calib_rows)
+                    fig_cal = go.Figure()
+                    fig_cal.add_trace(go.Bar(
+                        x=df_calib['Tranche'], y=df_calib['Win_Rate_Reel'],
+                        marker_color='#00BFFF', name='Win Rate réel (%)',
+                        text=[f"{v:.1f}%<br>n={n}" for v, n in zip(df_calib['Win_Rate_Reel'], df_calib['N'])],
+                        textposition='outside'
+                    ))
+                    fig_cal.add_hline(y=50, line_dash="dot", line_color="#FFD700",
+                                      annotation_text="50% (neutre)", annotation_position="bottom right")
+                    fig_cal.update_layout(
+                        yaxis_title="Fréquence de victoire (%)",
+                        xaxis_title="Tranche d'EV détecté",
+                        yaxis_range=[0, 100]
+                    )
+                    appliquer_theme_dark(fig_cal)
+                    st.plotly_chart(fig_cal, use_container_width=True)
+                else:
+                    st.info("Données insuffisantes pour la calibration.")
+            else:
+                st.info("Colonne `ev_modele` non trouvée dans le CSV.")
+
+        # ── P&L par marché ────────────────────────────────────────
+        with col_d:
+            st.subheader("📊 P&L par Marché")
+            if not df_bt_res.empty:
+                grp_m = df_bt_res.groupby('Type_Marche').agg(
+                    PnL=('resultat', 'sum'),
+                    Mise=('mise', 'sum'),
+                    N=('resultat', 'count')
+                ).reset_index()
+                grp_m['ROI'] = grp_m['PnL'] / grp_m['Mise'] * 100
+
+                fig_m = go.Figure()
+                couleurs_m = {'Handicap Asiatique': '#00BFFF', 'Totaux (Buts)': '#FF4500'}
+                fig_m.add_trace(go.Bar(
+                    x=grp_m['Type_Marche'], y=grp_m['PnL'],
+                    marker_color=[couleurs_m.get(m, '#FFFFFF') for m in grp_m['Type_Marche']],
+                    text=[f"P&L: {p:+.1f}u<br>ROI: {r:+.1f}%<br>N={n}"
+                          for p, r, n in zip(grp_m['PnL'], grp_m['ROI'], grp_m['N'])],
+                    textposition='outside',
+                    name='P&L (unités)'
+                ))
+                fig_m.add_hline(y=0, line_dash="dash", line_color="#FFFFFF", opacity=0.5)
+                fig_m.update_layout(yaxis_title="Profit / Perte (unités)", showlegend=False)
+                appliquer_theme_dark(fig_m)
+                st.plotly_chart(fig_m, use_container_width=True)
+            else:
+                st.info("Aucune donnée à afficher.")
+
+        # ── Tableau détaillé par ligue ────────────────────────────
+        st.markdown("---")
+        st.subheader("📋 Tableau de Synthèse par Ligue")
         if not df_bt_res.empty:
-            grp_m = df_bt_res.groupby('Type_Marche').agg(
+            tbl = df_bt_res.groupby(['Nom_Ligue', 'Type_Marche']).agg(
+                N=('resultat', 'count'),
                 PnL=('resultat', 'sum'),
                 Mise=('mise', 'sum'),
-                N=('resultat', 'count')
             ).reset_index()
-            grp_m['ROI'] = grp_m['PnL'] / grp_m['Mise'] * 100
+            tbl['ROI (%)'] = (tbl['PnL'] / tbl['Mise'] * 100).round(2)
+            tbl['P&L']     = tbl['PnL'].round(2)
+            tbl_clv = df_bt_clv.groupby(['Nom_Ligue', 'Type_Marche'])['clv'].mean().reset_index()
+            tbl_clv.columns = ['Nom_Ligue', 'Type_Marche', 'CLV moy (%)']
+            tbl_clv['CLV moy (%)'] = (tbl_clv['CLV moy (%)'] * 100).round(2)
+            tbl = tbl.merge(tbl_clv, on=['Nom_Ligue', 'Type_Marche'], how='left')
 
-            fig_m = go.Figure()
-            couleurs_m = {'Handicap Asiatique': '#00BFFF', 'Totaux (Buts)': '#FF4500'}
-            fig_m.add_trace(go.Bar(
-                x=grp_m['Type_Marche'], y=grp_m['PnL'],
-                marker_color=[couleurs_m.get(m, '#FFFFFF') for m in grp_m['Type_Marche']],
-                text=[f"P&L: {p:+.1f}u<br>ROI: {r:+.1f}%<br>N={n}"
-                      for p, r, n in zip(grp_m['PnL'], grp_m['ROI'], grp_m['N'])],
-                textposition='outside',
-                name='P&L (unités)'
-            ))
-            fig_m.add_hline(y=0, line_dash="dash", line_color="#FFFFFF", opacity=0.5)
-            fig_m.update_layout(yaxis_title="Profit / Perte (unités)", showlegend=False)
-            appliquer_theme_dark(fig_m)
-            st.plotly_chart(fig_m, use_container_width=True)
-        else:
-            st.info("Aucune donnée à afficher.")
+            def color_roi(val):
+                try:
+                    return 'color: #00FF00' if float(val) > 0 else 'color: #FF4500'
+                except Exception:
+                    return ''
 
-    # ── Tableau détaillé par ligue ────────────────────────────
-    st.markdown("---")
-    st.subheader("📋 Tableau de Synthèse par Ligue")
-    if not df_bt_res.empty:
-        tbl = df_bt_res.groupby(['Nom_Ligue', 'Type_Marche']).agg(
-            N=('resultat', 'count'),
-            PnL=('resultat', 'sum'),
-            Mise=('mise', 'sum'),
-        ).reset_index()
-        tbl['ROI (%)'] = (tbl['PnL'] / tbl['Mise'] * 100).round(2)
-        tbl['P&L']     = tbl['PnL'].round(2)
-        tbl_clv = df_bt_clv.groupby(['Nom_Ligue', 'Type_Marche'])['clv'].mean().reset_index()
-        tbl_clv.columns = ['Nom_Ligue', 'Type_Marche', 'CLV moy (%)']
-        tbl_clv['CLV moy (%)'] = (tbl_clv['CLV moy (%)'] * 100).round(2)
-        tbl = tbl.merge(tbl_clv, on=['Nom_Ligue', 'Type_Marche'], how='left')
-
-        def color_roi(val):
-            try:
-                return 'color: #00FF00' if float(val) > 0 else 'color: #FF4500'
-            except Exception:
-                return ''
-
-        display_cols = ['Nom_Ligue', 'Type_Marche', 'N', 'P&L', 'ROI (%)', 'CLV moy (%)']
-        st.dataframe(
-            tbl[display_cols].sort_values('ROI (%)', ascending=False)
-                             .style.map(color_roi, subset=['ROI (%)', 'CLV moy (%)']),
-            use_container_width=True
-        )
+            display_cols = ['Nom_Ligue', 'Type_Marche', 'N', 'P&L', 'ROI (%)', 'CLV moy (%)']
+            st.dataframe(
+                tbl[display_cols].sort_values('ROI (%)', ascending=False)
+                                 .style.map(color_roi, subset=['ROI (%)', 'CLV moy (%)']),
+                use_container_width=True
+            )
