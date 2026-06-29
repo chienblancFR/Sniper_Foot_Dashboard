@@ -1311,19 +1311,15 @@ async def analyser_un_match(session, m, ligue, saison_correcte, sos_map, mot_map
 
     for market in pinnacle['markets']:
         market_key_prelim = market['key']
+        if market_key_prelim != 'spreads':
+            continue
         for out in market.get('outcomes', []):
             try:
                 h_prelim = float(out.get('point', 0))
                 cote_prelim = float(out['price'])
 
-                if market_key_prelim == 'spreads':
-                    is_h_odds_prelim = (out['name'] == home_team_odds)
-                    ev_prelim = calculer_ev_ah(mat_preliminaire, h_prelim, is_h_odds_prelim, cote_prelim)
-                elif market_key_prelim == 'totals':
-                    is_over_prelim = "Over" in out['name']
-                    ev_prelim = calculer_ev_total_asiatique(mat_preliminaire, h_prelim, is_over_prelim, cote_prelim)
-                else:
-                    continue
+                is_h_odds_prelim = (out['name'] == home_team_odds)
+                ev_prelim = calculer_ev_ah(mat_preliminaire, h_prelim, is_h_odds_prelim, cote_prelim)
 
                 if ev_prelim > -0.05:
                     match_potentiel = True
@@ -1362,9 +1358,11 @@ async def analyser_un_match(session, m, ligue, saison_correcte, sos_map, mot_map
             mat_lineup_drop = generer_matrice_dixon(max(0.4, L_A_drop), max(0.4, L_B_drop), ligue['id'], saison_correcte)
             alerte_lineup_text = f"🔄 ROTATION MASSIVE DÉTECTÉE (Dom: {force_lineup_d:.2f}x | Ext: {force_lineup_e:.2f}x)"
 
-    # 🎯 PARCOURS DES MARCHÉS (Handicaps et Totaux)
+    # 🎯 PARCOURS DES MARCHÉS — Handicap Asiatique uniquement
     for market in pinnacle['markets']:
         market_key = market['key']
+        if market_key != 'spreads':
+            continue
         outcomes = market['outcomes']
 
         ovr_market = (1/float(outcomes[0]['price'])) + (1/float(outcomes[1]['price']))
@@ -1803,7 +1801,7 @@ async def traiter_une_ligue(session, ligue) -> int:
     if not stats:
         return 0
 
-    url_cotes = f"https://api.the-odds-api.com/v4/sports/{ligue['key']}/odds/?apiKey={API_ODDS_KEY}&regions=eu&markets=spreads,totals"
+    url_cotes = f"https://api.the-odds-api.com/v4/sports/{ligue['key']}/odds/?apiKey={API_ODDS_KEY}&regions=eu&markets=spreads"
     cotes = await fetch_async(session, url_cotes)
     date_deb = datetime.now().strftime('%Y-%m-%d')
     date_fin = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')

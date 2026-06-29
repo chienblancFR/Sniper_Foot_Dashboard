@@ -627,6 +627,10 @@ async def simuler_paris(conn):
             candidats = []  # (ev, market, outcome, h_val, cote_h24, is_home_or_over)
 
             for market, outcome, h_val, cote_h24 in odds_h24:
+                # Handicap Asiatique uniquement — les Totaux n'ont pas d'edge démontré
+                if market != 'spreads':
+                    continue
+
                 if cote_h24 < MIN_COTE:
                     continue
 
@@ -634,15 +638,9 @@ async def simuler_paris(conn):
                     process.extractOne(outcome, [home_name_odds])[1] > 85
                 )
 
-                if market == 'spreads':
-                    ev = ev_ah(mat, h_val, is_home, cote_h24)
-                    k  = kelly_ah(mat, h_val, is_home, cote_h24)
-                    flag = is_home
-                else:
-                    is_over = "Over" in outcome
-                    ev = ev_total(mat, h_val, is_over, cote_h24)
-                    k  = kelly_total(mat, h_val, is_over, cote_h24)
-                    flag = is_over
+                ev = ev_ah(mat, h_val, is_home, cote_h24)
+                k  = kelly_ah(mat, h_val, is_home, cote_h24)
+                flag = is_home
 
                 if not (EV_MIN <= ev <= EV_MAX):
                     continue
