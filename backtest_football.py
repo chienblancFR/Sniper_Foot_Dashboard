@@ -70,48 +70,159 @@ MIN_COTE     = 1.70   # ignorer les handicaps trop courts (< 1.70)
 N_PRIOR      = 8      # matchs-équivalents shrinkage bayésien
 
 NAME_MAPPING = {
+    # 🇫🇷 LIGUE 1
     "Paris Saint-Germain": "Paris Saint Germain",
     "Olympique Lyonnais": "Lyon", "Olympique de Marseille": "Marseille",
-    "Stade Rennais FC": "Rennes", "Stade de Reims": "Reims",
-    "AS Monaco": "Monaco", "OGC Nice": "Nice", "RC Lens": "Lens",
-    "Lille OSC": "Lille", "FC Nantes": "Nantes",
-    "RC Strasbourg Alsace": "Strasbourg", "Montpellier HSC": "Montpellier",
-    "Stade Brestois 29": "Brest", "FC Lorient": "Lorient",
-    "AJ Auxerre": "Auxerre", "Le Havre AC": "Le Havre",
-    "Athletic Club": "Athletic Bilbao", "Atlético Madrid": "Atletico Madrid",
-    "Deportivo Alavés": "Alaves", "Cádiz CF": "Cadiz", "RC Celta": "Celta Vigo",
-    "FC Bayern München": "Bayern Munich", "1. FC Köln": "FC Koeln",
-    "Borussia Mönchengladbach": "Borussia Monchengladbach",
-    "TSG Hoffenheim": "Hoffenheim", "SC Freiburg": "Freiburg",
-    "VfB Stuttgart": "Stuttgart", "1. FSV Mainz 05": "Mainz",
-    "FC Augsburg": "Augsburg", "SV Werder Bremen": "Werder Bremen",
-    "VfL Wolfsburg": "Wolfsburg", "VfL Bochum 1848": "Bochum",
-    "1. FC Union Berlin": "Union Berlin", "1. FC Heidenheim 1846": "Heidenheim",
+    "Stade Rennais FC": "Rennes", "Stade Rennais": "Rennes",
+    "Stade de Reims": "Reims", "AS Monaco": "Monaco", "OGC Nice": "Nice",
+    "RC Lens": "Lens", "Lille OSC": "Lille", "FC Nantes": "Nantes",
+    "RC Strasbourg Alsace": "Strasbourg", "RC Strasbourg": "Strasbourg",
+    "Montpellier HSC": "Montpellier", "Stade Brestois 29": "Brest",
+    "FC Lorient": "Lorient", "AJ Auxerre": "Auxerre", "Le Havre AC": "Le Havre",
+    "Toulouse FC": "Toulouse", "Angers SCO": "Angers",
+    "AS Saint-Étienne": "Saint-Etienne", "AS Saint-Etienne": "Saint-Etienne",
+    "Girondins de Bordeaux": "Bordeaux",
+    # 🇪🇸 LA LIGA
+    "Athletic Club": "Athletic Bilbao", "Athletic Club de Bilbao": "Athletic Bilbao",
+    "Atlético Madrid": "Atletico Madrid", "Deportivo Alavés": "Alaves",
+    "Cádiz CF": "Cadiz", "RC Celta": "Celta Vigo", "RCD Espanyol": "Espanyol",
+    "RCD Mallorca": "Mallorca", "Getafe CF": "Getafe", "CA Osasuna": "Osasuna",
+    "Real Betis Balompié": "Real Betis", "Sevilla FC": "Sevilla",
+    "Valencia CF": "Valencia", "Real Valladolid": "Valladolid",
+    "Girona FC": "Girona", "UD Las Palmas": "Las Palmas",
+    "CD Leganés": "Leganes", "Villarreal CF": "Villarreal",
+    "UD Almería": "Almeria", "Granada CF": "Granada",
+    # 🇪🇸 LALIGA 2
+    "SD Huesca": "Huesca", "Real Oviedo": "Oviedo",
+    "Sporting Gijón": "Sporting Gijon", "Sporting de Gijón": "Sporting Gijon",
+    "Real Zaragoza": "Zaragoza", "SD Eibar": "Eibar", "Málaga CF": "Malaga",
+    "Racing Club de Santander": "Racing Santander", "Burgos CF": "Burgos",
+    "Elche CF": "Elche", "Levante UD": "Levante",
+    "Albacete Balompié": "Albacete", "FC Cartagena": "Cartagena",
+    "CD Tenerife": "Tenerife", "Córdoba CF": "Cordoba", "CD Eldense": "Eldense",
+    # 🇩🇪 BUNDESLIGA
+    "FC Bayern München": "Bayern Munich", "Bayern München": "Bayern Munich",
+    "1. FC Köln": "FC Koeln", "Borussia Mönchengladbach": "Borussia Monchengladbach",
+    "TSG Hoffenheim": "Hoffenheim", "TSG 1899 Hoffenheim": "Hoffenheim",
+    "SC Freiburg": "Freiburg", "VfB Stuttgart": "Stuttgart",
+    "1. FSV Mainz 05": "Mainz", "FC Augsburg": "Augsburg",
+    "SV Werder Bremen": "Werder Bremen", "VfL Wolfsburg": "Wolfsburg",
+    "VfL Bochum 1848": "Bochum", "Hertha BSC": "Hertha Berlin",
+    "1. FC Union Berlin": "Union Berlin", "FC Union Berlin": "Union Berlin",
+    "1. FC Heidenheim 1846": "Heidenheim", "1. FC Heidenheim": "Heidenheim",
     "FC St. Pauli": "St. Pauli", "SV Darmstadt 98": "Darmstadt 98",
-    "Inter": "Inter Milan", "ACF Fiorentina": "Fiorentina",
+    "Holstein Kiel": "Holstein Kiel",
+    # 🇮🇹 SERIE A & SERIE B
+    "Inter": "Inter Milan", "AC Milan": "AC Milan", "AS Roma": "Roma",
+    "SS Lazio": "Lazio", "ACF Fiorentina": "Fiorentina",
     "Atalanta BC": "Atalanta", "Hellas Verona": "Verona",
     "Torino FC": "Torino", "Bologna FC 1909": "Bologna",
-    "Genoa CFC": "Genoa", "Udinese Calcio": "Udinese",
-    "Parma Calcio 1913": "Parma", "Venezia FC": "Venezia",
-    "SL Benfica": "Benfica", "FC Porto": "Porto", "SC Braga": "Braga",
-    "Vitória SC": "Vitoria Guimaraes",
-    "Galatasaray SK": "Galatasaray", "Fenerbahçe SK": "Fenerbahce",
-    "Beşiktaş JK": "Besiktas", "İstanbul Başakşehir FK": "Basaksehir",
-    "AFC Ajax": "Ajax", "PSV Eindhoven": "PSV", "AZ Alkmaar": "AZ",
-    "FK Bodø/Glimt": "Bodo/Glimt", "Molde FK": "Molde",
-    "Rosenborg BK": "Rosenborg", "SK Brann": "Brann",
-    "Malmö FF": "Malmo FF", "Djurgårdens IF": "Djurgarden",
-    "RSC Anderlecht": "Anderlecht", "Club Brugge KV": "Club Brugge",
-    "KAA Gent": "Gent", "Standard Liège": "Standard Liege",
-    "KRC Genk": "Genk", "Royal Antwerp FC": "Antwerp",
-    "Royale Union Saint-Gilloise": "Union Saint Gilloise",
-    "Atlético-MG": "Atletico Mineiro", "São Paulo FC": "Sao Paulo",
-    "Athletico Paranaense": "Athletico-PR",
-    "Inter Miami CF": "Inter Miami", "Atlanta United FC": "Atlanta United",
-    "Seattle Sounders FC": "Seattle Sounders",
+    "Genoa CFC": "Genoa", "US Sassuolo Calcio": "Sassuolo",
+    "Udinese Calcio": "Udinese", "Cagliari Calcio": "Cagliari",
+    "Empoli FC": "Empoli", "US Lecce": "Lecce",
+    "Parma Calcio 1913": "Parma", "Como 1907": "Como",
+    "Venezia FC": "Venezia", "US Salernitana 1919": "Salernitana",
+    "Frosinone Calcio": "Frosinone", "US Cremonese": "Cremonese",
+    "AC Pisa 1909": "Pisa", "Brescia Calcio": "Brescia",
+    "Spezia Calcio": "Spezia", "SSC Bari": "Bari",
+    "UC Sampdoria": "Sampdoria", "Modena FC 2018": "Modena",
+    # 🏴󠁧󠁢󠁥󠁮󠁧󠁿 PREMIER LEAGUE & CHAMPIONSHIP
+    "Manchester United": "Manchester United", "Manchester City": "Manchester City",
+    "Tottenham Hotspur": "Tottenham Hotspur",
     "Wolverhampton Wanderers": "Wolverhampton",
     "Brighton & Hove Albion": "Brighton", "West Ham United": "West Ham",
-    "Newcastle United": "Newcastle",
+    "Newcastle United": "Newcastle", "Leicester City": "Leicester",
+    "Ipswich Town": "Ipswich", "Southampton": "Southampton",
+    "Sheffield United": "Sheffield United", "Sheff Utd": "Sheffield United",
+    "Sheffield Wednesday": "Sheffield Wednesday", "Sheff Wed": "Sheffield Wednesday",
+    "Queens Park Rangers": "QPR", "Leeds United": "Leeds",
+    "West Bromwich Albion": "West Brom", "Swansea City": "Swansea",
+    "Luton Town": "Luton", "Hull City": "Hull", "Middlesbrough": "Middlesbrough",
+    "Coventry City": "Coventry", "Sunderland": "Sunderland",
+    "Plymouth Argyle": "Plymouth", "Bristol City": "Bristol City",
+    "Watford": "Watford", "Norwich City": "Norwich", "Cardiff City": "Cardiff",
+    "Stoke City": "Stoke", "Blackburn Rovers": "Blackburn",
+    "Preston North End": "Preston", "Burnley FC": "Burnley",
+    "Burnley": "Burnley", "Millwall": "Millwall",
+    "Huddersfield Town": "Huddersfield", "Birmingham City": "Birmingham",
+    "Rotherham United": "Rotherham", "Derby County": "Derby",
+    "Portsmouth": "Portsmouth", "Oxford United": "Oxford Utd",
+    "Nottingham Forest": "Nottingham Forest", "Nottm Forest": "Nottingham Forest",
+    # 🇳🇱 EREDIVISIE
+    "AFC Ajax": "Ajax", "PSV Eindhoven": "PSV", "AZ Alkmaar": "AZ",
+    "FC Utrecht": "Utrecht", "FC Twente": "Twente",
+    "SC Heerenveen": "Heerenveen", "PEC Zwolle": "PEC Zwolle",
+    "Almere City FC": "Almere City", "FC Groningen": "Groningen",
+    "Sparta Rotterdam": "Sparta Rotterdam", "RKC Waalwijk": "RKC Waalwijk",
+    "NEC Nijmegen": "NEC",
+    # 🇵🇹 PRIMEIRA LIGA
+    "SL Benfica": "Benfica", "FC Porto": "Porto", "Sporting CP": "Sporting CP",
+    "SC Braga": "Braga", "Vitória SC": "Vitoria Guimaraes",
+    "Vitoria SC": "Vitoria Guimaraes", "Gil Vicente FC": "Gil Vicente",
+    "Boavista FC": "Boavista", "Moreirense FC": "Moreirense",
+    "GD Estoril Praia": "Estoril", "GD Chaves": "Chaves",
+    "Casa Pia AC": "Casa Pia", "CD Famalicão": "Famalicao",
+    "Rio Ave FC": "Rio Ave", "SC Farense": "Farense",
+    "CF Arouca": "Arouca", "CD Nacional": "Nacional",
+    # 🇹🇷 SÜPER LIG
+    "Galatasaray SK": "Galatasaray", "Fenerbahçe SK": "Fenerbahce",
+    "Fenerbahce SK": "Fenerbahce", "Beşiktaş JK": "Besiktas",
+    "Besiktas JK": "Besiktas", "Kasımpaşa SK": "Kasimpasa",
+    "İstanbul Başakşehir FK": "Basaksehir", "Istanbul Basaksehir FK": "Basaksehir",
+    "Göztepe SK": "Goztepe", "Yılport Samsunspor": "Samsunspor",
+    "Fatih Karagümrük SK": "Karagumruk", "Sivasspor": "Sivasspor",
+    "Alanyaspor": "Alanyaspor", "Konyaspor": "Konyaspor",
+    "Antalyaspor": "Antalyaspor", "Kayserispor": "Kayserispor",
+    "Gaziantep FK": "Gaziantep", "MKE Ankaragücü": "Ankaragucu",
+    "Adana Demirspor": "Adana Demirspor",
+    # 🇧🇷 SÉRIE A BRÉSIL
+    "Athletico Paranaense": "Athletico-PR", "Atlético Paranaense": "Athletico-PR",
+    "Atlético-MG": "Atletico Mineiro", "Atlético Mineiro": "Atletico Mineiro",
+    "Bragantino": "Red Bull Bragantino", "Grêmio": "Gremio",
+    "São Paulo FC": "Sao Paulo", "Sao Paulo": "Sao Paulo",
+    "Sport Club Corinthians Paulista": "Corinthians",
+    "Sociedade Esportiva Palmeiras": "Palmeiras",
+    "Club de Regatas do Flamengo": "Flamengo",
+    "Fluminense FC": "Fluminense", "Botafogo FR": "Botafogo",
+    "CR Vasco da Gama": "Vasco da Gama", "EC Bahia": "Bahia",
+    "Fortaleza EC": "Fortaleza", "Sport Club Internacional": "Internacional",
+    "Cruzeiro EC": "Cruzeiro", "EC Juventude": "Juventude",
+    "Criciúma EC": "Criciuma", "Santos FC": "Santos",
+    "Ceará SC": "Ceara", "Coritiba FC": "Coritiba",
+    # 🇸🇪 ALLSVENSKAN
+    "AIK Fotboll": "AIK", "Malmö FF": "Malmo FF",
+    "Djurgårdens IF": "Djurgarden", "IFK Göteborg": "IFK Goteborg",
+    "BK Häcken": "BK Hacken", "IFK Norrköping": "IFK Norrkoping",
+    "Mjällby AIF": "Mjallby", "Halmstads BK": "Halmstad",
+    "IK Sirius FK": "Sirius", "Kalmar FF": "Kalmar",
+    "Degerfors IF": "Degerfors", "GIF Sundsvall": "Sundsvall",
+    # 🇳🇴 ELITESERIEN
+    "FK Bodø/Glimt": "Bodo/Glimt", "Bodø/Glimt": "Bodo/Glimt",
+    "Molde FK": "Molde", "Rosenborg BK": "Rosenborg", "SK Brann": "Brann",
+    "Viking FK": "Viking", "Tromsø IL": "Tromso", "IL Tromso": "Tromso",
+    "Stabæk Fotball": "Stabek", "Strømsgodset IF": "Stromsgodset",
+    "FK Haugesund": "Haugesund", "Odd BK": "Odd",
+    "Sandefjord Fotball": "Sandefjord", "Lillestrøm SK": "Lillestrom",
+    # 🇧🇪 JUPILER PRO LEAGUE
+    "RSC Anderlecht": "Anderlecht", "Club Brugge KV": "Club Brugge",
+    "KAA Gent": "Gent", "Standard Liège": "Standard Liege",
+    "Standard de Liège": "Standard Liege", "KRC Genk": "Genk",
+    "Royal Antwerp FC": "Antwerp",
+    "Royale Union Saint-Gilloise": "Union Saint Gilloise",
+    "R. Charleroi SC": "Charleroi", "Cercle Brugge KSV": "Cercle Brugge",
+    "Sint-Truidense VV": "Sint-Truiden", "KV Mechelen": "Mechelen",
+    "KV Kortrijk": "Kortrijk", "K. Beerschot VA": "Beerschot",
+    "KAS Eupen": "Eupen", "OH Leuven": "OHL Leuven",
+    "Westerlo": "Westerlo", "RWDM Brussels FC": "RWDM",
+    # 🇺🇸 MLS
+    "Inter Miami CF": "Inter Miami", "LA Galaxy": "Los Angeles Galaxy",
+    "LAFC": "Los Angeles FC", "New York Red Bulls": "NY Red Bulls",
+    "New York City FC": "New York City FC", "Seattle Sounders FC": "Seattle Sounders",
+    "Atlanta United FC": "Atlanta United", "D.C. United": "DC United",
+    "Colorado Rapids": "Colorado Rapids", "Houston Dynamo FC": "Houston Dynamo",
+    "Minnesota United FC": "Minnesota United", "CF Montréal": "CF Montreal",
+    "Chicago Fire FC": "Chicago Fire", "Vancouver Whitecaps FC": "Vancouver Whitecaps",
+    "St. Louis City SC": "St. Louis City", "Austin FC": "Austin FC",
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -511,7 +622,19 @@ async def phase_collecte(conn, session):
 # ─────────────────────────────────────────────────────────────
 # 🔬  PHASE 2 — SIMULATION DU MODÈLE
 # ─────────────────────────────────────────────────────────────
-async def reconstruire_xg_equipe(conn, team_id, ligue_id, avant_date, saison, venue='all'):
+async def calculer_ligue_avg(conn, ligue_id, saison, avant_date):
+    """Moyenne de buts par équipe par match dans la ligue/saison AVANT avant_date."""
+    async with conn.execute("""
+        SELECT AVG((CAST(gh AS REAL) + CAST(ga AS REAL)) / 2.0)
+        FROM bt_fixtures
+        WHERE ligue_id=? AND saison=? AND date_utc < ?
+          AND gh IS NOT NULL AND ga IS NOT NULL
+    """, (ligue_id, saison, avant_date)) as cur:
+        row = await cur.fetchone()
+    return max(0.8, row[0]) if row and row[0] else 1.3
+
+
+async def reconstruire_xg_equipe(conn, team_id, ligue_id, avant_date, saison, venue='all', ligue_avg=1.3):
     """
     Calcule le xG moyen de l'équipe en utilisant UNIQUEMENT les matchs
     joués AVANT avant_date. Réplique la logique du bot principal :
@@ -569,7 +692,6 @@ async def reconstruire_xg_equipe(conn, team_id, ligue_id, avant_date, saison, ve
 
     xg_off_brut = tp / tw
     xg_def_brut = tc / tw
-    ligue_avg = 1.3
 
     n = len(rows)
     w_eq = n / (n + N_PRIOR)
@@ -623,12 +745,15 @@ async def simuler_paris(conn):
             if not odds_h24:
                 continue
 
+            # Moyenne de buts de la ligue calculée dynamiquement (remplace 1.3 hardcodé)
+            avg_ligue = await calculer_ligue_avg(conn, ligue['id'], saison, date_utc)
+
             # Reconstituer xG AVANT ce match — split home/away comme le bot principal
             xg_off_d, xg_def_d, n_d = await reconstruire_xg_equipe(
-                conn, h_id, ligue['id'], date_utc, saison, venue='home'
+                conn, h_id, ligue['id'], date_utc, saison, venue='home', ligue_avg=avg_ligue
             )
             xg_off_e, xg_def_e, n_e = await reconstruire_xg_equipe(
-                conn, a_id, ligue['id'], date_utc, saison, venue='away'
+                conn, a_id, ligue['id'], date_utc, saison, venue='away', ligue_avg=avg_ligue
             )
 
             # Filtre : ignorer si l'une des équipes manque d'historique suffisant
@@ -761,6 +886,33 @@ async def generer_rapport(conn):
         if dd > max_dd:
             max_dd = dd
     print(f"  Drawdown max        : {max_dd:.1%}")
+
+    # ── Rapport par saison ──────────────────────────────────
+    print(f"\n{'─'*50}")
+    print(f"  PAR SAISON")
+    print(f"{'─'*50}")
+    print(f"  {'Saison':<8} {'N':>5} {'CLV':>8} {'ROI':>8} {'P&L':>8} {'Drawdown':>10}")
+    print(f"  {'─'*8} {'─'*5} {'─'*8} {'─'*8} {'─'*8} {'─'*10}")
+
+    par_saison = defaultdict(list)
+    for s in signaux:
+        par_saison[s[2]].append(s)  # s[2] = saison
+
+    for saison, rows_s in sorted(par_saison.items()):
+        clv_s  = [r[14] for r in rows_s if r[14] is not None]
+        res_s  = [(r[13], r[10]) for r in rows_s if r[13] is not None]
+        pnl_s  = sum(r * m for r, m in res_s)
+        mis_s  = sum(m for _, m in res_s)
+        roi_s  = pnl_s / mis_s if mis_s else 0
+        clv_s_moy = np.mean(clv_s) if clv_s else 0
+        # Drawdown par saison
+        bk, pk, dd_s = 100.0, 100.0, 0.0
+        for r, m in res_s:
+            bk += r * m
+            if bk > pk: pk = bk
+            dd_s = max(dd_s, (pk - bk) / pk)
+        marker = "✅" if roi_s > 0 else "❌"
+        print(f"  {marker} {saison:<6} {len(rows_s):>5} {clv_s_moy:>+7.1%} {roi_s:>+7.1%} {pnl_s:>+7.1f}u {dd_s:>9.1%}")
 
     # ── Rapport par ligue ───────────────────────────────────
     print(f"\n{'─'*50}")
