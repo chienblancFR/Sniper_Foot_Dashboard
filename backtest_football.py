@@ -39,22 +39,22 @@ DB_PATH      = "backtest_data.db"
 SAISONS_BACKTEST = [2023, 2024]  # 2023 = saison 2023-24 pour ligues hivernales
 
 CHAMPIONNATS = [
-    {"nom": "La Liga",          "id": 140, "key": "soccer_spain_la_liga",            "c1": 4,  "rel": 18, "ev_min": 0.05, "ev_max": 0.15},
-    {"nom": "Bundesliga",       "id": 78,  "key": "soccer_germany_bundesliga",        "c1": 4,  "rel": 16, "ev_min": 0.05, "ev_max": 0.15},
-    {"nom": "Eredivisie",       "id": 88,  "key": "soccer_netherlands_eredivisie",    "c1": 2,  "rel": 16, "ev_min": 0.05, "ev_max": 0.15},
-    {"nom": "Serie A",          "id": 135, "key": "soccer_italy_serie_a",             "c1": 4,  "rel": 18, "ev_min": 0.05, "ev_max": 0.15},
-    {"nom": "Primeira Liga",    "id": 94,  "key": "soccer_portugal_primeira_liga",    "c1": 2,  "rel": 16, "ev_min": 0.05, "ev_max": 0.15},
-    {"nom": "Süper Lig",        "id": 203, "key": "soccer_turkey_super_league",       "c1": 2,  "rel": 17, "ev_min": 0.05, "ev_max": 0.15},
-    {"nom": "Allsvenskan",      "id": 113, "key": "soccer_sweden_allsvenskan",        "c1": 3,  "rel": 14, "ev_min": 0.05, "ev_max": 0.15},
-    {"nom": "Série A Brésil",   "id": 71,  "key": "soccer_brazil_campeonato",         "c1": 6,  "rel": 17, "ev_min": 0.05, "ev_max": 0.15},
-    {"nom": "Ligue 1",          "id": 61,  "key": "soccer_france_ligue_one",          "c1": 4,  "rel": 16, "ev_min": 0.05, "ev_max": 0.15},
-    {"nom": "LaLiga 2",         "id": 141, "key": "soccer_spain_segunda_division",    "c1": 2,  "rel": 19, "ev_min": 0.05, "ev_max": 0.15},
-    {"nom": "Premier League",   "id": 39,  "key": "soccer_epl",                       "c1": 4,  "rel": 18, "ev_min": 0.05, "ev_max": 0.15},
-    {"nom": "Championship",     "id": 40,  "key": "soccer_england_championship",      "c1": 2,  "rel": 22, "ev_min": 0.05, "ev_max": 0.15},
-    {"nom": "MLS",              "id": 253, "key": "soccer_usa_mls",                   "c1": 7,  "rel": 99, "ev_min": 0.05, "ev_max": 0.15},
-    {"nom": "Eliteserien",      "id": 103, "key": "soccer_norway_eliteserien",        "c1": 2,  "rel": 14, "ev_min": 0.05, "ev_max": 0.15},
-    {"nom": "Jupiler Pro",      "id": 144, "key": "soccer_belgium_first_div",         "c1": 6,  "rel": 13, "ev_min": 0.05, "ev_max": 0.15},
-    {"nom": "Serie B",          "id": 136, "key": "soccer_italy_serie_b",             "c1": 2,  "rel": 16, "ev_min": 0.05, "ev_max": 0.15},
+    {"nom": "La Liga",          "id": 140, "key": "soccer_spain_la_liga",            "c1": 4,  "rel": 18, "ev_min": 0.05, "ev_max": 0.15, "n_prior":  7},
+    {"nom": "Bundesliga",       "id": 78,  "key": "soccer_germany_bundesliga",        "c1": 4,  "rel": 16, "ev_min": 0.05, "ev_max": 0.15, "n_prior":  8},
+    {"nom": "Eredivisie",       "id": 88,  "key": "soccer_netherlands_eredivisie",    "c1": 2,  "rel": 16, "ev_min": 0.05, "ev_max": 0.15, "n_prior":  9},
+    {"nom": "Serie A",          "id": 135, "key": "soccer_italy_serie_a",             "c1": 4,  "rel": 18, "ev_min": 0.05, "ev_max": 0.15, "n_prior":  7},
+    {"nom": "Primeira Liga",    "id": 94,  "key": "soccer_portugal_primeira_liga",    "c1": 2,  "rel": 16, "ev_min": 0.05, "ev_max": 0.15, "n_prior":  9},
+    {"nom": "Süper Lig",        "id": 203, "key": "soccer_turkey_super_league",       "c1": 2,  "rel": 17, "ev_min": 0.05, "ev_max": 0.15, "n_prior":  9},
+    {"nom": "Allsvenskan",      "id": 113, "key": "soccer_sweden_allsvenskan",        "c1": 3,  "rel": 14, "ev_min": 0.05, "ev_max": 0.15, "n_prior": 12},
+    {"nom": "Série A Brésil",   "id": 71,  "key": "soccer_brazil_campeonato",         "c1": 6,  "rel": 17, "ev_min": 0.05, "ev_max": 0.15, "n_prior":  9},
+    {"nom": "Ligue 1",          "id": 61,  "key": "soccer_france_ligue_one",          "c1": 4,  "rel": 16, "ev_min": 0.05, "ev_max": 0.15, "n_prior":  8},
+    {"nom": "LaLiga 2",         "id": 141, "key": "soccer_spain_segunda_division",    "c1": 2,  "rel": 19, "ev_min": 0.05, "ev_max": 0.15, "n_prior":  8},
+    {"nom": "Premier League",   "id": 39,  "key": "soccer_epl",                       "c1": 4,  "rel": 18, "ev_min": 0.05, "ev_max": 0.15, "n_prior":  7},
+    {"nom": "Championship",     "id": 40,  "key": "soccer_england_championship",      "c1": 2,  "rel": 22, "ev_min": 0.05, "ev_max": 0.15, "n_prior":  7},
+    {"nom": "MLS",              "id": 253, "key": "soccer_usa_mls",                   "c1": 7,  "rel": 99, "ev_min": 0.05, "ev_max": 0.15, "n_prior": 10},
+    {"nom": "Eliteserien",      "id": 103, "key": "soccer_norway_eliteserien",        "c1": 2,  "rel": 14, "ev_min": 0.05, "ev_max": 0.15, "n_prior": 12},
+    {"nom": "Jupiler Pro",      "id": 144, "key": "soccer_belgium_first_div",         "c1": 6,  "rel": 13, "ev_min": 0.05, "ev_max": 0.15, "n_prior": 11},
+    {"nom": "Serie B",          "id": 136, "key": "soccer_italy_serie_b",             "c1": 2,  "rel": 16, "ev_min": 0.05, "ev_max": 0.15, "n_prior": 10},
 ]
 
 RHO_PAR_LIGUE = {
@@ -65,7 +65,7 @@ RHO_PAR_LIGUE = {
 RHO_DEFAULT  = -0.12
 KELLY_FRAC      = 0.05   # fraction Kelly (5% — aligné avec le bot)
 MIN_COTE        = 1.70   # ignorer les handicaps trop courts (< 1.70)
-N_PRIOR         = 8      # matchs-équivalents shrinkage bayésien
+N_PRIOR_DEFAULT = 8      # fallback shrinkage bayésien (valeur par ligue dans CHAMPIONNATS)
 # Poids du modèle dans le blend EV à H-24 : poids_dyn = 0.15 + 0.15*(24/168) ≈ 0.171
 # Réplique la pondération dynamique du bot pour les paris pris environ 24h avant le coup d'envoi.
 POIDS_DYN_H24   = 0.171
@@ -635,16 +635,18 @@ async def calculer_ligue_avg(conn, ligue_id, saison, avant_date):
     return max(0.8, row[0]) if row and row[0] else 1.3
 
 
-async def reconstruire_xg_equipe(conn, team_id, ligue_id, avant_date, saison, venue='all', ligue_avg=1.3):
+async def reconstruire_xg_equipe(conn, team_id, ligue_id, avant_date, saison, venue='all', ligue_avg=1.3, n_prior=None):
     """
     Calcule le xG moyen de l'équipe en utilisant UNIQUEMENT les matchs
     joués AVANT avant_date. Réplique la logique du bot principal :
     - split home/away (venue='home'|'away'|'all')
     - decay exponentiel (demi-vie 46j)
-    - shrinkage bayésien
+    - shrinkage bayésien adaptatif (n_prior par ligue)
     - fallback saison précédente si < 10 matchs
     Retourne (xg_off, xg_def, n_matchs).
     """
+    if n_prior is None:
+        n_prior = N_PRIOR_DEFAULT
     if venue == 'home':
         venue_filter = "AND f.home_id = ?"
         params = (team_id, ligue_id, saison, saison - 1, avant_date, team_id)
@@ -671,7 +673,7 @@ async def reconstruire_xg_equipe(conn, team_id, ligue_id, avant_date, saison, ve
 
     # Fallback sur toutes les venues si < 5 matchs dans le venue demandé
     if len(rows) < 5 and venue != 'all':
-        return await reconstruire_xg_equipe(conn, team_id, ligue_id, avant_date, saison, venue='all')
+        return await reconstruire_xg_equipe(conn, team_id, ligue_id, avant_date, saison, venue='all', ligue_avg=ligue_avg, n_prior=n_prior)
 
     if len(rows) < 5:
         return 1.3, 1.1, len(rows)  # Promu / données insuffisantes
@@ -695,7 +697,7 @@ async def reconstruire_xg_equipe(conn, team_id, ligue_id, avant_date, saison, ve
     xg_def_brut = tc / tw
 
     n = len(rows)
-    w_eq = n / (n + N_PRIOR)
+    w_eq = n / (n + n_prior)
     xg_off = w_eq * xg_off_brut + (1 - w_eq) * ligue_avg
     xg_def = w_eq * xg_def_brut + (1 - w_eq) * ligue_avg
     return xg_off, xg_def, n
@@ -748,13 +750,14 @@ async def simuler_paris(conn):
 
             # Moyenne de buts de la ligue calculée dynamiquement (remplace 1.3 hardcodé)
             avg_ligue = await calculer_ligue_avg(conn, ligue['id'], saison, date_utc)
+            n_prior_l = ligue.get('n_prior', N_PRIOR_DEFAULT)
 
             # Reconstituer xG AVANT ce match — split home/away + global comme le bot principal
             xg_off_d_sp, xg_def_d_sp, n_d = await reconstruire_xg_equipe(
-                conn, h_id, ligue['id'], date_utc, saison, venue='home', ligue_avg=avg_ligue
+                conn, h_id, ligue['id'], date_utc, saison, venue='home', ligue_avg=avg_ligue, n_prior=n_prior_l
             )
             xg_off_e_sp, xg_def_e_sp, n_e = await reconstruire_xg_equipe(
-                conn, a_id, ligue['id'], date_utc, saison, venue='away', ligue_avg=avg_ligue
+                conn, a_id, ligue['id'], date_utc, saison, venue='away', ligue_avg=avg_ligue, n_prior=n_prior_l
             )
 
             # Filtre : ignorer si l'une des équipes manque d'historique suffisant
@@ -764,10 +767,10 @@ async def simuler_paris(conn):
             # Venue blending adaptatif : réplique w_venue() du bot
             # Moins de matchs venue-spécifiques → on se fie davantage aux stats globales
             xg_off_d_gl, xg_def_d_gl, _ = await reconstruire_xg_equipe(
-                conn, h_id, ligue['id'], date_utc, saison, venue='all', ligue_avg=avg_ligue
+                conn, h_id, ligue['id'], date_utc, saison, venue='all', ligue_avg=avg_ligue, n_prior=n_prior_l
             )
             xg_off_e_gl, xg_def_e_gl, _ = await reconstruire_xg_equipe(
-                conn, a_id, ligue['id'], date_utc, saison, venue='all', ligue_avg=avg_ligue
+                conn, a_id, ligue['id'], date_utc, saison, venue='all', ligue_avg=avg_ligue, n_prior=n_prior_l
             )
 
             def w_venue(n_spec, max_w=0.80):

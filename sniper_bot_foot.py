@@ -85,6 +85,30 @@ API_METEO_KEY = os.getenv("OPENWEATHER_KEY")
 KELLY_FRAC = 0.05       # Fraction Kelly de base (ajustée dynamiquement selon le drawdown)
 KELLY_COURANT = 0.05   # Mise à jour chaque cycle par actualiser_kelly_adaptatif()
 
+# Shrinkage bayésien adaptatif : plus la ligue est petite / données xG peu fiables,
+# plus on maintient longtemps les estimations proches de la moyenne de ligue.
+# Grandes ligues 20 clubs / 38J → prior faible (on fait confiance aux données équipe plus vite)
+# Petites ligues 16 clubs / 30J → prior élevé (on reste prudent plus longtemps)
+N_PRIOR_PAR_LIGUE = {
+    140: 7,   # La Liga         (20 clubs, 38J)
+    39:  7,   # Premier League  (20 clubs, 38J)
+    135: 7,   # Serie A         (20 clubs, 38J)
+    40:  7,   # Championship    (24 clubs, 46J — beaucoup de matchs)
+    78:  8,   # Bundesliga      (18 clubs, 34J)
+    61:  8,   # Ligue 1         (18 clubs, 34J)
+    141: 8,   # LaLiga 2        (22 clubs, 42J)
+    88:  9,   # Eredivisie      (18 clubs, 34J — moins de couverture médiatique)
+    94:  9,   # Primeira Liga   (18 clubs, 34J)
+    203: 9,   # Süper Lig       (19 clubs, 36J)
+    71:  9,   # Série A Brésil  (20 clubs, 38J — xG parfois incomplets)
+    136: 10,  # Serie B         (20 clubs, 38J — xG souvent absents → fallback buts)
+    253: 10,  # MLS             (29 clubs, calendrier irrégulier, hétérogénéité élevée)
+    144: 11,  # Jupiler Pro     (16 clubs + championship round)
+    113: 12,  # Allsvenskan     (16 clubs, 30J — petite ligue nordique)
+    103: 12,  # Eliteserien     (16 clubs, 30J — petite ligue nordique)
+}
+N_PRIOR_DEFAULT = 8
+
 # Ligues confirmées sans xG via auto-détection (voir detecter_ligues_sans_xg).
 # Ce set est peuplé dynamiquement au démarrage — les valeurs ci-dessous sont
 # des valeurs initiales conservatrices, remplacées dès le premier scan.
@@ -1588,15 +1612,13 @@ async def obtenir_xg_moyenne_async(session, team_id, l_id, saison_actuelle, sos_
     xg_off_brut = tp / tw
     xg_def_brut = tc / tw
 
-    # --- 🎯 SHRINKAGE BAYÉSIEN (James-Stein) ---
+    # --- 🎯 SHRINKAGE BAYÉSIEN ADAPTATIF (James-Stein) ---
     # Régresse les estimations vers la moyenne de ligue pour éviter la sur-réaction
     # aux petits échantillons (ex: 5-8 matchs en début de saison).
-    # À n=5 : 38% confiance équipe / 62% moyenne ligue
-    # À n=10 : 56% confiance équipe / 44% moyenne ligue
-    # À n=15 : 65% confiance équipe / 35% moyenne ligue
-    N_PRIOR = 8  # matchs-équivalents de confiance dans la moyenne de ligue
+    # N_PRIOR varie selon la ligue : plus elle est petite / données peu fiables → prior élevé.
+    n_prior = N_PRIOR_PAR_LIGUE.get(l_id, N_PRIOR_DEFAULT)
     n = len(matchs_a_analyser)
-    w_equipe = n / (n + N_PRIOR)
+    w_equipe = n / (n + n_prior)
     w_ligue  = 1.0 - w_equipe
 
     xg_off = w_equipe * xg_off_brut + w_ligue * ligue_avg
