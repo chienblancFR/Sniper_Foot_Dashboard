@@ -215,78 +215,100 @@ def generer_matrice(l_dom, l_ext, rho=-0.12):
     return m / np.sum(m)
 
 
+_EPS = 1e-6   # tolérance pour comparaisons float (quarts de handicap)
+
+def _payout_ah(res_net, cote):
+    """5 issues Asian Handicap : full win / half win / push / half loss / full loss."""
+    if res_net > 0.25 + _EPS:           return cote            # full win
+    if abs(res_net - 0.25) < _EPS:      return 1.0 + (cote - 1.0) / 2  # half win
+    if abs(res_net) < _EPS:             return 1.0             # push
+    if abs(res_net + 0.25) < _EPS:      return 0.5             # half loss
+    return 0.0                                                  # full loss
+
+def _x_kelly_ah(res_net, cote):
+    """Gain net pour Kelly mean-variance."""
+    if res_net > 0.25 + _EPS:           return cote - 1.0
+    if abs(res_net - 0.25) < _EPS:      return (cote - 1.0) / 2.0
+    if abs(res_net) < _EPS:             return 0.0
+    if abs(res_net + 0.25) < _EPS:      return -0.5
+    return -1.0
+
+def _payout_total(res_net, cote):
+    """5 issues Asian Total : même logique que AH."""
+    return _payout_ah(res_net, cote)
+
+def _x_kelly_total(res_net, cote):
+    return _x_kelly_ah(res_net, cote)
+
+
 def ev_ah(mat, h, is_home, cote):
+    """EV Asian Handicap — signe et 5 issues identiques au bot principal."""
     esp = 0.0
     for i in range(10):
         for j in range(10):
             diff = (i - j) if is_home else (j - i)
-            score_aj = diff - h
-            if score_aj > 0:   gain = 1.0
-            elif score_aj < 0: gain = -1.0
-            else:              gain = 0.0
-            esp += mat[i, j] * gain
-    return (esp * cote) - 1.0
+            res_net = diff + h          # ← signe correct (même convention que le bot)
+            esp += mat[i, j] * _payout_ah(res_net, cote)
+    return esp - 1.0
 
 
 def ev_total(mat, h, is_over, cote):
+    """EV Total Asiatique — 5 issues."""
     esp = 0.0
     for i in range(10):
         for j in range(10):
             tot = i + j
-            if is_over:
-                if tot > h:    gain = 1.0
-                elif tot < h:  gain = -1.0
-                else:          gain = 0.0
-            else:
-                if tot < h:    gain = 1.0
-                elif tot > h:  gain = -1.0
-                else:          gain = 0.0
-            esp += mat[i, j] * gain
-    return (esp * cote) - 1.0
+            res_net = (tot - h) if is_over else (h - tot)
+            esp += mat[i, j] * _payout_total(res_net, cote)
+    return esp - 1.0
 
 
 def kelly_ah(mat, h, is_home, cote):
+    """Kelly mean-variance AH — 5 issues, signe correct."""
     e1, e2 = 0.0, 0.0
     for i in range(10):
         for j in range(10):
             diff = (i - j) if is_home else (j - i)
-            score_aj = diff - h
-            if score_aj > 0:   x = cote - 1
-            elif score_aj < 0: x = -1.0
-            else:              x = 0.0
+            res_net = diff + h
+            x = _x_kelly_ah(res_net, cote)
             e1 += mat[i, j] * x
             e2 += mat[i, j] * x * x
     return (e1 / e2) if e2 > 1e-9 else 0.0
 
 
 def kelly_total(mat, h, is_over, cote):
+    """Kelly mean-variance Total — 5 issues."""
     e1, e2 = 0.0, 0.0
     for i in range(10):
         for j in range(10):
             tot = i + j
-            if is_over:
-                x = (cote - 1) if tot > h else (-1.0 if tot < h else 0.0)
-            else:
-                x = (cote - 1) if tot < h else (-1.0 if tot > h else 0.0)
+            res_net = (tot - h) if is_over else (h - tot)
+            x = _x_kelly_total(res_net, cote)
             e1 += mat[i, j] * x
             e2 += mat[i, j] * x * x
     return (e1 / e2) if e2 > 1e-9 else 0.0
 
 
 def resultat_ah(gh, ga, h, is_home):
+    """Résultat réel AH — même convention de signe que le bot."""
     diff = (gh - ga) if is_home else (ga - gh)
-    score_aj = diff - h
-    if score_aj > 0:   return 1.0
-    elif score_aj < 0: return -1.0
-    return 0.0
+    res_net = diff + h
+    if res_net > 0.25 + _EPS:           return 1.0      # full win
+    if abs(res_net - 0.25) < _EPS:      return 0.5      # half win
+    if abs(res_net) < _EPS:             return 0.0      # push
+    if abs(res_net + 0.25) < _EPS:      return -0.5     # half loss
+    return -1.0                                          # full loss
 
 
 def resultat_total(gh, ga, h, is_over):
+    """Résultat réel Total Asiatique."""
     tot = gh + ga
-    if is_over:
-        return 1.0 if tot > h else (-1.0 if tot < h else 0.0)
-    else:
-        return 1.0 if tot < h else (-1.0 if tot > h else 0.0)
+    res_net = (tot - h) if is_over else (h - tot)
+    if res_net > 0.25 + _EPS:           return 1.0
+    if abs(res_net - 0.25) < _EPS:      return 0.5
+    if abs(res_net) < _EPS:             return 0.0
+    if abs(res_net + 0.25) < _EPS:      return -0.5
+    return -1.0
 
 
 # ─────────────────────────────────────────────────────────────

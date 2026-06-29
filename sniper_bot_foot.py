@@ -1691,6 +1691,8 @@ def generer_matrice_dixon(l_dom, l_ext, ligue_id=None, saison=None):
     m[1, 1] *= max(0, 1 - rho)
     return m / np.sum(m)
 
+_EPS_AH = 1e-6  # tolérance float pour quarts de handicap
+
 def calculer_ev_ah(matrice, h, is_h, cote):
     esperance = 0.0
     for i in range(10):
@@ -1700,11 +1702,11 @@ def calculer_ev_ah(matrice, h, is_h, cote):
             score_diff = (i - j) if is_h else (j - i)
             res_net = score_diff + h
 
-            if res_net > 0.25: payout = cote
-            elif res_net == 0.25: payout = 1.0 + (cote - 1.0)/2
-            elif res_net == 0: payout = 1.0
-            elif res_net == -0.25: payout = 0.5
-            else: payout = 0.0
+            if res_net > 0.25 + _EPS_AH:            payout = cote
+            elif abs(res_net - 0.25) < _EPS_AH:     payout = 1.0 + (cote - 1.0) / 2
+            elif abs(res_net) < _EPS_AH:             payout = 1.0
+            elif abs(res_net + 0.25) < _EPS_AH:     payout = 0.5
+            else:                                    payout = 0.0
             esperance += prob * payout
     return esperance - 1.0
 
@@ -1719,11 +1721,11 @@ def calculer_ev_total_asiatique(matrice, ligne, is_over, cote):
             total_match = i + j
             res_net = (total_match - ligne) if is_over else (ligne - total_match)
 
-            if res_net > 0.25: payout = cote
-            elif res_net == 0.25: payout = 1.0 + (cote - 1.0)/2
-            elif res_net == 0: payout = 1.0
-            elif res_net == -0.25: payout = 0.5
-            else: payout = 0.0
+            if res_net > 0.25 + _EPS_AH:            payout = cote
+            elif abs(res_net - 0.25) < _EPS_AH:     payout = 1.0 + (cote - 1.0) / 2
+            elif abs(res_net) < _EPS_AH:             payout = 1.0
+            elif abs(res_net + 0.25) < _EPS_AH:     payout = 0.5
+            else:                                    payout = 0.0
 
             esperance += prob * payout
     return esperance - 1.0
@@ -1742,11 +1744,11 @@ def calculer_kelly_ah(matrice, h, is_h, cote):
             if prob < 0.0001: continue
             score_diff = (i - j) if is_h else (j - i)
             res_net = score_diff + h
-            if res_net > 0.25:    x = cote - 1.0
-            elif res_net == 0.25: x = (cote - 1.0) / 2.0
-            elif res_net == 0:    x = 0.0
-            elif res_net == -0.25: x = -0.5
-            else:                  x = -1.0
+            if res_net > 0.25 + _EPS_AH:        x = cote - 1.0
+            elif abs(res_net - 0.25) < _EPS_AH: x = (cote - 1.0) / 2.0
+            elif abs(res_net) < _EPS_AH:         x = 0.0
+            elif abs(res_net + 0.25) < _EPS_AH: x = -0.5
+            else:                                x = -1.0
             e_x  += prob * x
             e_x2 += prob * x * x
     return e_x / e_x2 if e_x2 > 1e-9 else 0.0
@@ -1763,11 +1765,11 @@ def calculer_kelly_total(matrice, ligne, is_over, cote):
             if prob < 0.0001: continue
             total_match = i + j
             res_net = (total_match - ligne) if is_over else (ligne - total_match)
-            if res_net > 0.25:    x = cote - 1.0
-            elif res_net == 0.25: x = (cote - 1.0) / 2.0
-            elif res_net == 0:    x = 0.0
-            elif res_net == -0.25: x = -0.5
-            else:                  x = -1.0
+            if res_net > 0.25 + _EPS_AH:        x = cote - 1.0
+            elif abs(res_net - 0.25) < _EPS_AH: x = (cote - 1.0) / 2.0
+            elif abs(res_net) < _EPS_AH:         x = 0.0
+            elif abs(res_net + 0.25) < _EPS_AH: x = -0.5
+            else:                                x = -1.0
             e_x  += prob * x
             e_x2 += prob * x * x
     return e_x / e_x2 if e_x2 > 1e-9 else 0.0
