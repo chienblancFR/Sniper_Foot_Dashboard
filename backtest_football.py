@@ -19,7 +19,7 @@ import csv
 import os
 import sys
 from scipy.stats import poisson
-from scipy.optimize import minimize_scalar
+from scipy.optimize import minimize_scalar, minimize
 from thefuzz import process
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
@@ -635,6 +635,201 @@ async def calculer_ligue_avg(conn, ligue_id, saison, avant_date):
     return max(0.8, row[0]) if row and row[0] else 1.3
 
 
+async def calculer_moyennes_venue(conn, ligue_id, saison, avant_date):
+    """
+    Moyennes de buts domicile / extérieur AVANT avant_date.
+    m_dom_l = AVG(gh), m_ext_l = AVG(ga) — aligné sur actualiser_stats_ligue du bot.
+    """
+    async with conn.execute("""
+        SELECT AVG(CAST(gh AS REAL)), AVG(CAST(ga AS REAL))
+        FROM bt_fixtures
+        WHERE ligue_id=? AND saison=? AND date_utc < ?
+          AND gh IS NOT NULL AND ga IS NOT NULL
+    """, (ligue_id, saison, avant_date)) as cur:
+        row = await cur.fetchone()
+    if row and row[0] and row[1]:
+        return float(row[0]), float(row[1])
+    return 1.4, 1.1
+
+
+async def estimer_parametres_dc_bt(conn, ligue_id, saison, avant_date, mu_h, mu_a):
+    """
+    MLE joint Dixon-Coles (α, β, γ, ρ) par équipe — réplique estimer_parametres_dc_complet().
+    Utilise UNIQUEMENT les matchs avec date_utc < avant_date (pas de lookahead).
+    Pondération temporelle (demi-vie 90j) relative à avant_date.
+    """
+    async with conn.execute("""
+        SELECT gh, ga, home_id, away_id, date_utc
+        FROM bt_fixtures
+        WHERE ligue_id=? AND saison=? AND date_utc < ?
+          AND gh IS NOT NULL AND ga IS NOT NULL
+    """, (ligue_id, saison, avant_date)) as cur:
+        rows_curr = await cur.fetchall()
+
+    async with conn.execute("""
+        SELECT gh, ga, home_id, away_id, date_utc
+        FROM bt_fixtures
+        WHERE ligue_id=? AND saison=? AND date_utc < ?
+          AND gh IS NOT NULL AND ga IS NOT NULL
+    """, (ligue_id, saison - 1, avant_date)) as cur:
+        rows_prev = await cur.fetchall()
+
+    valid_curr = [(d, e, h, a, md) for d, e, h, a, md in rows_curr if h and a]
+    valid_prev = [(d, e, h, a, md) for d, e, h, a, md in rows_prev if h and a]
+
+    if len(valid_curr) < 40:
+        return None
+
+    team_counts: dict[int, int] = {}
+    for _, _, h, a, _ in valid_curr:
+        team_counts[h] = team_counts.get(h, 0) + 1
+        team_counts[a] = team_counts.get(a, 0) + 1
+    eligible = {t for t, c in team_counts.items() if c >= 4}
+    if len(eligible) < 8:
+        return None
+
+    teams = sorted(eligible)
+    N = len(teams)
+    idx = {t: i for i, t in enumerate(teams)}
+
+    try:
+        ref_ts = datetime.fromisoformat(avant_date.replace('Z', '+00:00'))
+        if ref_ts.tzinfo is None:
+            ref_ts = ref_ts.replace(tzinfo=timezone.utc)
+    except Exception:
+        ref_ts = datetime.now(timezone.utc)
+
+    HALF_LIFE_DAYS = 90.0
+    decay = np.log(2) / HALF_LIFE_DAYS
+
+    def weight(match_date_str, base_w):
+        if not match_date_str:
+            return base_w
+        try:
+            dt = datetime.fromisoformat(match_date_str.replace('Z', '+00:00'))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            days_ago = max(0, (ref_ts - dt).total_seconds() / 86400)
+            return base_w * np.exp(-decay * days_ago)
+        except Exception:
+            return base_w
+
+    all_matches = []
+    for d, e, h, a, md in valid_curr:
+        if h in idx and a in idx:
+            all_matches.append((int(d), int(e), idx[h], idx[a], weight(md, 1.0)))
+    for d, e, h, a, md in valid_prev:
+        if h in idx and a in idx:
+            all_matches.append((int(d), int(e), idx[h], idx[a], weight(md, 0.5)))
+
+    if len(all_matches) < 40:
+        return None
+
+    max_g = max(max(d, e) for d, e, _, _, _ in all_matches)
+    log_fact = np.zeros(max_g + 2)
+    for k in range(1, max_g + 2):
+        log_fact[k] = log_fact[k - 1] + np.log(k)
+
+    def neg_ll(x):
+        log_a = x[:N]
+        log_d = x[N:2 * N]
+        log_g = x[2 * N]
+        rho = float(np.clip(x[2 * N + 1], -0.40, -0.001))
+        pen = (float(np.sum(log_a))) ** 2 * 15.0
+
+        ll = 0.0
+        for gh, ga, hi, ai, w in all_matches:
+            lh = float(np.clip(np.exp(log_a[hi] + log_d[ai] + log_g), 0.1, 12.0))
+            la = float(np.clip(np.exp(log_a[ai] + log_d[hi]), 0.1, 12.0))
+            ll += w * (gh * np.log(lh) - lh - float(log_fact[gh]))
+            ll += w * (ga * np.log(la) - la - float(log_fact[ga]))
+            if gh == 0 and ga == 0:
+                tau = max(1e-9, 1.0 - lh * la * rho)
+            elif gh == 1 and ga == 0:
+                tau = max(1e-9, 1.0 + la * rho)
+            elif gh == 0 and ga == 1:
+                tau = max(1e-9, 1.0 + lh * rho)
+            elif gh == 1 and ga == 1:
+                tau = max(1e-9, 1.0 - rho)
+            else:
+                tau = 1.0
+            ll += w * np.log(tau)
+        return -(ll - pen)
+
+    x0 = np.zeros(2 * N + 2)
+    x0[2 * N] = np.log(max(0.5, mu_h))
+    x0[2 * N + 1] = -0.13
+
+    bounds = ([(-2.5, 2.5)] * N +
+              [(-2.5, 2.5)] * N +
+              [(-0.5, 0.5)] +
+              [(-0.40, -0.001)])
+
+    try:
+        res = minimize(neg_ll, x0, method='L-BFGS-B', bounds=bounds,
+                       options={'maxiter': 3000, 'ftol': 1e-9})
+    except Exception:
+        return None
+
+    if not res.success:
+        return None
+
+    x = res.x
+    log_a = x[:N]
+    log_d = x[N:2 * N]
+    gamma = float(np.exp(x[2 * N]))
+    rho = float(np.clip(x[2 * N + 1], -0.40, -0.001))
+
+    mean_log_d = float(np.mean(log_d))
+    log_d -= mean_log_d
+    gamma *= np.exp(mean_log_d)
+
+    if gamma > 0:
+        scale = mu_h / gamma
+        log_a += np.log(max(scale, 1e-6))
+        gamma *= scale
+
+    return {
+        'gamma': gamma,
+        'rho': rho,
+        'teams': {
+            team_id: {
+                'attack': float(np.exp(log_a[i])),
+                'defense': float(np.exp(log_d[i])),
+            }
+            for i, team_id in enumerate(teams)
+        },
+    }
+
+
+def calculer_lambda_blend(dc, h_id, a_id, xg_off_d, xg_def_d, xg_off_e, xg_def_e, m_dom_l, m_ext_l, ligue_id=None):
+    """
+    Calcule L_A / L_B avec la même logique que analyser_un_match() du bot live :
+      λ_xg : formule venue-normalisée (xg_off × xg_def_adverse / moyenne ligue)
+      λ_dc : attack × defense × γ
+      blend 50/50 si DC disponible pour les deux équipes, sinon xG pur.
+    """
+    if not m_dom_l or not m_ext_l:
+        m_dom_l, m_ext_l = max(m_dom_l or 1.4, 0.1), max(m_ext_l or 1.1, 0.1)
+
+    L_A_xg = (xg_off_d * xg_def_e) / m_dom_l
+    L_B_xg = (xg_off_e * xg_def_d) / m_ext_l
+    rho = RHO_PAR_LIGUE.get(ligue_id, RHO_DEFAULT) if ligue_id else RHO_DEFAULT
+
+    if dc and h_id in dc['teams'] and a_id in dc['teams']:
+        td = dc['teams'][h_id]
+        te = dc['teams'][a_id]
+        L_A_dc = td['attack'] * te['defense'] * dc['gamma']
+        L_B_dc = te['attack'] * td['defense']
+        L_A = 0.50 * L_A_dc + 0.50 * L_A_xg
+        L_B = 0.50 * L_B_dc + 0.50 * L_B_xg
+        rho = dc['rho']
+    else:
+        L_A, L_B = L_A_xg, L_B_xg
+
+    return max(0.4, L_A), max(0.4, L_B), rho
+
+
 async def reconstruire_xg_equipe(conn, team_id, ligue_id, avant_date, saison, venue='all', ligue_avg=1.3, n_prior=None):
     """
     Calcule le xG moyen de l'équipe en utilisant UNIQUEMENT les matchs
@@ -718,6 +913,7 @@ async def simuler_paris(conn):
     print(f"  📋 Fixtures avec résultat : {n_fix}")
     print(f"  📊 Cotes H-24 en base     : {n_odds}")
     print(f"  🎯 Entrées xG en base     : {n_xg}")
+    print("  🧮 Modèle : blend 50/50 DC (MLE α/β/γ/ρ) + xG venue-normalisé (aligné bot live)")
 
     if n_odds == 0:
         print("\n  ⚠️  AUCUNE cote H-24 trouvée — la collecte d'odds a échoué.")
@@ -734,6 +930,8 @@ async def simuler_paris(conn):
             fixtures = await cur.fetchall()
 
         signaux = 0
+        dc_cache = {}  # (ligue_id, saison, n_prior) -> params DC (point-in-time, sans lookahead)
+
         for fid, saison, date_utc, h_id, a_id, h_name, a_name, gh, ga in fixtures:
             if gh is None or ga is None:
                 continue
@@ -783,11 +981,26 @@ async def simuler_paris(conn):
             xg_off_e = xg_off_e_sp * we + xg_off_e_gl * (1.0 - we)
             xg_def_e = xg_def_e_sp * we + xg_def_e_gl * (1.0 - we)
 
-            # Paramètres Poisson Dixon-Coles avec avantage domicile implicite via split venue
-            L_A = max(0.4, (xg_off_d + xg_def_e) / 2)
-            L_B = max(0.4, (xg_off_e + xg_def_d) / 2)
+            # Moyennes venue ligue + estimation DC (cache invalidé quand n_prior change)
+            m_dom_l, m_ext_l = await calculer_moyennes_venue(conn, ligue['id'], saison, date_utc)
+            async with conn.execute(
+                "SELECT COUNT(*) FROM bt_fixtures WHERE ligue_id=? AND saison=? AND date_utc < ? AND gh IS NOT NULL",
+                (ligue['id'], saison, date_utc)
+            ) as cur:
+                n_prior = (await cur.fetchone())[0]
 
-            rho = RHO_PAR_LIGUE.get(ligue['id'], RHO_DEFAULT)
+            dc_key = (ligue['id'], saison, n_prior)
+            if dc_key not in dc_cache:
+                dc_cache[dc_key] = await estimer_parametres_dc_bt(
+                    conn, ligue['id'], saison, date_utc, m_dom_l, m_ext_l
+                )
+            dc = dc_cache[dc_key]
+
+            # λ blend 50/50 DC + xG — aligné sur analyser_un_match() du bot live
+            L_A, L_B, rho = calculer_lambda_blend(
+                dc, h_id, a_id, xg_off_d, xg_def_d, xg_off_e, xg_def_e, m_dom_l, m_ext_l, ligue['id']
+            )
+
             mat = generer_matrice(L_A, L_B, rho)
 
             # Parcourir les marchés — collecter tous les signaux valides pour ce fixture
