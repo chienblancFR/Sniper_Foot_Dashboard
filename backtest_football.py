@@ -824,7 +824,7 @@ async def simuler_paris(conn):
                 cote_partner = partner_cote.get((market, -h_val))
                 if cote_partner and cote_partner > 1.0:
                     ovr = (1.0 / cote_h24) + (1.0 / cote_partner)
-                    cote_novig = cote_h24 / ovr
+                    cote_novig = cote_h24 * ovr   # proportional devigging : fair_odds = market × ovr
                     ev_pinnacle = ev_ah(mat, h_val, is_home, cote_novig)
                 else:
                     ev_pinnacle = ev_modele  # fallback si partenaire absent

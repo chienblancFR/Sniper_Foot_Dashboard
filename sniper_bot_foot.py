@@ -940,22 +940,28 @@ HEADERS_FB = {"x-apisports-key": API_FOOTBALL_KEY, "v": "3"}
 # ==========================================
 # 🛠️ 2. OUTILS SYSTÈME
 # ==========================================
-async def fetch_async(session, url, headers=None):
+async def fetch_async(session, url, headers=None, retries=3):
     async with semaphore:
-        try:
-            async with session.get(url, headers=headers, timeout=15) as response:
-                if response.status == 200:
-                    # Surveiller le quota API-Football (100 req/jour en plan gratuit)
-                    remaining = response.headers.get('x-ratelimit-requests-remaining')
-                    if remaining is not None and int(remaining) < 10:
-                        log_info(f"⚠️ QUOTA API-Football bas : {remaining} requêtes restantes !")
-                    return await response.json()
-                if response.status == 429:
-                    log_info("🚫 API-Football : rate limit atteint (429). Pause 60s...")
-                    await asyncio.sleep(60)
-                return None
-        except Exception:
-            return None
+        for attempt in range(retries):
+            try:
+                async with session.get(url, headers=headers, timeout=15) as response:
+                    if response.status == 200:
+                        remaining = response.headers.get('x-ratelimit-requests-remaining')
+                        if remaining is not None and int(remaining) < 10:
+                            log_info(f"⚠️ QUOTA API-Football bas : {remaining} requêtes restantes !")
+                        return await response.json()
+                    if response.status == 429:
+                        wait = 60 * (attempt + 1)
+                        log_info(f"🚫 Rate limit 429 (tentative {attempt+1}/{retries}) — pause {wait}s : {url[:80]}")
+                        await asyncio.sleep(wait)
+                        continue
+                    log_info(f"⚠️ HTTP {response.status} (tentative {attempt+1}/{retries}) : {url[:80]}")
+                    return None
+            except Exception as e:
+                wait = 2 ** attempt
+                log_info(f"⚠️ fetch_async erreur (tentative {attempt+1}/{retries}, pause {wait}s) : {e}")
+                await asyncio.sleep(wait)
+        return None
 
 async def envoyer_telegram_async(session, msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -1321,6 +1327,9 @@ async def analyser_un_match(session, m, ligue, saison_correcte, sos_map, mot_map
     dt_obj = datetime.fromisoformat(m['fixture']['date'].replace('Z', '+00:00'))
     hr = (dt_obj - datetime.now(dt_obj.tzinfo)).total_seconds() / 3600
 
+    # Alimenter le cache d'heures dès le scan pour que calculer_pause() soit réactif
+    cache_heures_matchs[id_m] = dt_obj
+
     # 🎯 LE FILTRE TEMPOREL : Le Sniper ne s'active qu'à partir de H-36
     if not (0.9 <= hr <= 36.0): return
 
@@ -1474,81 +1483,100 @@ async def analyser_un_match(session, m, ligue, saison_correcte, sos_map, mot_map
             continue
         outcomes = market['outcomes']
 
-        ovr_market = (1/float(outcomes[0]['price'])) + (1/float(outcomes[1]['price']))
+        # Vérifier une seule fois si un pari PENDING existe déjà sur ce match
+        async with db_lock:
+            async with db_conn.execute(
+                "SELECT id_match FROM paris_log WHERE id_match=? AND statut='PENDING'",
+                (id_m,)
+            ) as cursor:
+                deja_parie_ce_match = await cursor.fetchone()
 
+        if deja_parie_ce_match:
+            continue  # 🔒 1 seul pari actif par match — tracker_clv_async gère le suivi
+
+        # Matrice active (rotation ou normale) + seuil EV adapté
+        if mat_lineup_drop is not None:
+            mat_actif = mat_lineup_drop
+            ev_min_rotation = ev_min_effectif + 0.02
+        else:
+            mat_actif = mat
+            ev_min_rotation = ev_min_effectif
+
+        # Collecte de tous les spreads valides pour choisir le meilleur EV
+        candidats = []
         for out in outcomes:
             h, cote, nom = float(out['point']), float(out['price']), out['name']
 
-            pari_nom_display = f"{nom} {h}" if market_key == 'totals' else f"{nom} ({h})"
-
+            # Pari exact déjà en log → skip (le tracker_clv_async gère la mise à jour CLV)
             async with db_lock:
                 async with db_conn.execute(
-                    "SELECT cote_prise, statut FROM paris_log WHERE id_match=? AND equipe=? AND handicap=?",
+                    "SELECT cote_prise FROM paris_log WHERE id_match=? AND equipe=? AND handicap=?",
                     (id_m, nom, h)
                 ) as cursor:
-                    pari_exact = await cursor.fetchone()
+                    if await cursor.fetchone():
+                        continue
 
-                # 🔒 FILTRE CORRÉLÉ : 1 seul pari par match, tous marchés confondus.
-                # Empêche de prendre AH + Totals sur le même fixture (positions corrélées).
-                async with db_conn.execute(
-                    "SELECT id_match FROM paris_log WHERE id_match=? AND statut='PENDING'",
-                    (id_m,)
-                ) as cursor:
-                    deja_parie_ce_match = await cursor.fetchone()
+            is_h_odds = (nom == home_team_odds)
 
-            # Pari déjà enregistré → le tracker_clv_async gère les mises à jour CLV.
-            if pari_exact:
-                continue
+            # Dévigging proportionnel : chercher la cote partenaire de la même ligne
+            # (même |handicap|, équipe adverse) pour calculer l'overround exact de cette ligne.
+            # fair_odds = market_odds × ovr  (ovr > 1 → les fair odds sont AU-DESSUS du marché)
+            cote_partenaire = next(
+                (float(o['price']) for o in outcomes
+                 if o['name'] != nom and abs(float(o.get('point', 0)) + h) < 0.01),
+                None
+            )
+            if cote_partenaire and cote_partenaire > 1.0:
+                ovr_ligne = (1.0 / cote) + (1.0 / cote_partenaire)
+                cote_novig = cote * ovr_ligne   # méthode proportionnelle correcte
+            else:
+                cote_novig = cote               # pas de partenaire détecté → pas de dévigging
 
-            # --- 🎯 LOGIQUE NOUVEAU PARI ---
-            elif not deja_parie_ce_match:
-                is_h_odds = (nom == home_team_odds)
+            ev_modele  = calculer_ev_ah(mat_actif, h, is_h_odds, cote)
+            ev_pinnacle = calculer_ev_ah(mat_actif, h, is_h_odds, cote_novig)
+            ev_final   = (ev_modele * poids_dyn) + (ev_pinnacle * (1 - poids_dyn))
 
-                # Choisir la matrice active selon l'état des compositions
-                # Si rotation massive détectée (mat_lineup_drop calculé), on l'utilise
-                # et on exige un EV minimum supplémentaire de +2% pour absorber l'incertitude.
-                if mat_lineup_drop is not None:
-                    mat_actif = mat_lineup_drop
-                    ev_min_rotation = ev_min_effectif + 0.02
-                else:
-                    mat_actif = mat
-                    ev_min_rotation = ev_min_effectif
+            if ev_min_rotation <= ev_final <= ligue['ev_max']:
+                kelly_theorique = calculer_kelly_ah(mat_actif, h, is_h_odds, cote)
+                mise_u = round((kelly_theorique * 100) * KELLY_COURANT, 2)
+                mise_u = min(mise_u, 5.0)
+                if mise_u >= 0.1:
+                    candidats.append({
+                        'ev_final': ev_final, 'ev_modele': ev_modele, 'ev_pinnacle': ev_pinnacle,
+                        'h': h, 'cote': cote, 'nom': nom, 'mise_u': mise_u
+                    })
 
-                ev_modele = calculer_ev_ah(mat_actif, h, is_h_odds, cote)
+        if not candidats:
+            continue
 
-                # Signal Pinnacle désvigué (méthode proportionnelle)
-                cote_novig = cote / ovr_market
-                ev_pinnacle = calculer_ev_ah(mat_actif, h, is_h_odds, cote_novig)
-                ev_final = (ev_modele * poids_dyn) + (ev_pinnacle * (1 - poids_dyn))
+        # Sélectionner le spread avec le meilleur EV final
+        best = max(candidats, key=lambda x: x['ev_final'])
+        h, cote, nom  = best['h'], best['cote'], best['nom']
+        ev_final      = best['ev_final']
+        ev_modele     = best['ev_modele']
+        ev_pinnacle   = best['ev_pinnacle']
+        mise_u        = best['mise_u']
 
-                if ev_min_rotation <= ev_final <= ligue['ev_max']:
-                    kelly_theorique = calculer_kelly_ah(mat_actif, h, is_h_odds, cote)
-                    mise_u = round((kelly_theorique * 100) * KELLY_COURANT, 2)
-                    mise_u = min(mise_u, 5.0)
+        badge         = "✅ *XI CONFIRMÉ*" if lineup_ok else "⏳ *Compo Probable*"
+        rotation_note = f"\n⚠️ {alerte_lineup_text}" if alerte_lineup_text else ""
 
-                    if mise_u < 0.1: continue
+        msg = (f"🎯 *SIGNAL [{ligue['nom']}] 🏆 HANDICAP*\n"
+               f"🏟️ {n_d} - {n_e}\n{badge} | {hko_label}{rotation_note}\n"
+               f"💎 Pari : *{nom} ({h:+g})* @ {cote:.2f}\n"
+               f"🔥 Value : *+{ev_final:.1%}* (Mod: {ev_modele:+.1%} | Pin: {ev_pinnacle:+.1%})\n"
+               f"📏 Mise Kelly : *{mise_u} u*")
+        await envoyer_telegram_async(session, msg)
 
-                    badge = "✅ *XI CONFIRMÉ*" if lineup_ok else "⏳ *Compo Probable*"
-                    market_label = "🏆 HANDICAP"
-                    rotation_note = f"\n⚠️ {alerte_lineup_text}" if alerte_lineup_text else ""
-
-                    msg = (f"🎯 *SIGNAL [{ligue['nom']}] {market_label}*\n"
-                           f"🏟️ {n_d} - {n_e}\n{badge} | {hko_label}{rotation_note}\n"
-                           f"💎 Pari : *{pari_nom_display}* @ {cote:.2f}\n"
-                           f"🔥 Value : *+{ev_final:.1%}* (Mod: {ev_modele:+.1%} | Pin: {ev_pinnacle:+.1%})\n"
-                           f"📏 Mise Kelly : *{mise_u} u*")
-                    await envoyer_telegram_async(session, msg)
-
-                    async with db_lock:
-                        ligue_tag = f"{ligue['nom']} [{market_key}]"
-                        await db_conn.execute("""INSERT OR IGNORE INTO paris_log
-                            (id_match, equipe, handicap, cote_prise, mise, edge_detecte, p_modele, ligue,
-                             is_lineup_official, timestamp, equipe_dom, equipe_ext, kickoff)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                            (id_m, nom, h, cote, mise_u, round(ev_final, 4), round(ev_modele, 4), ligue_tag,
-                             int(lineup_ok), datetime.now().isoformat(),
-                             home_team_odds, away_team_odds, m['fixture']['date']))
-                        await db_conn.commit()
+        async with db_lock:
+            ligue_tag = f"{ligue['nom']} [{market_key}]"
+            await db_conn.execute("""INSERT OR IGNORE INTO paris_log
+                (id_match, equipe, handicap, cote_prise, mise, edge_detecte, p_modele, ligue,
+                 is_lineup_official, timestamp, equipe_dom, equipe_ext, kickoff)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (id_m, nom, h, cote, mise_u, round(ev_final, 4), round(ev_modele, 4), ligue_tag,
+                 int(lineup_ok), datetime.now().isoformat(),
+                 home_team_odds, away_team_odds, m['fixture']['date']))
+            await db_conn.commit()
 
 # ==========================================
 # 🚀 5. FONCTIONS MATHS & xG
@@ -1599,11 +1627,15 @@ async def obtenir_xg_moyenne_async(session, team_id, l_id, saison_actuelle, sos_
         p, c = None, None
 
         async with db_lock:
-            async with db_conn.execute("SELECT xg_p, xg_c FROM xg_cache WHERE cle=?", (f"xg_{f_id}_{team_id}",)) as cursor:
+            async with db_conn.execute("SELECT xg_p, xg_c, is_xg FROM xg_cache WHERE cle=?", (f"xg_{f_id}_{team_id}",)) as cursor:
                 db_res = await cursor.fetchone()
 
-        if db_res:
-            p, c = db_res
+        # Utiliser le cache seulement si les données sont des vrais xG (is_xg=1).
+        # Si is_xg=0 (buts comme proxy) et que la ligue fournit maintenant des xG,
+        # on invalide pour re-fetch les statistiques réelles.
+        cache_valide = db_res and (db_res[2] == 1 or l_id in LIGUES_SANS_XG)
+        if cache_valide:
+            p, c = db_res[0], db_res[1]
         else:
             # Par défaut : buts réels comme proxy (fallback garanti)
             is_h_team = (m['teams']['home']['id'] == team_id)
