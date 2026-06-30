@@ -93,6 +93,10 @@ def load_backtest_data():
     if statut != "ok":
         return df, statut, source
 
+    required = {'ligue_id', 'saison', 'market', 'resultat', 'mise'}
+    if not required.issubset(df.columns):
+        return pd.DataFrame(), "error", source
+
     df['Nom_Ligue'] = df['ligue_id'].map(LIGUE_NOMS).fillna(df['ligue_id'].astype(str))
     df['Type_Marche'] = df['market'].map(
         {'spreads': 'Handicap Asiatique', 'totals': 'Totaux (Buts)'}
@@ -141,6 +145,15 @@ if section == "📡 Live Performance":
     df_live = filtre_ligue_sidebar(df_live, key="live_ligue")
     df_live = filtre_marche_sidebar(df_live, key="live_marche")
 
+    if "Statut" not in df_live.columns:
+        st.error("Format CSV live invalide (colonne `Statut` manquante).")
+        st.stop()
+    if df_live.empty:
+        if df.empty:
+            st.stop()  # message déjà affiché par afficher_alertes_chargement
+        st.info("Aucune transaction ne correspond aux filtres sélectionnés.")
+        st.stop()
+
     df_termines = df_live[df_live['Statut'].isin(['WON', 'HALF-WON', 'VOID', 'HALF-LOST', 'LOST'])].copy()
     df_attente  = df_live[df_live['Statut'] == 'PENDING'].copy()
 
@@ -158,7 +171,7 @@ if section == "📡 Live Performance":
     if not df_termines.empty:
         df_termines, max_dd_pct = calculer_max_drawdown(df_termines, 'Profit_Unites', CAPITAL_INITIAL)
 
-    df_clv_ok = df_termines[df_termines['CLV'].notna() & (df_termines['CLV'] != 0)] if not df_termines.empty else pd.DataFrame()
+    df_clv_ok = df_termines[(df_termines['CLV'].notna()) & (df_termines['CLV'] != 0)] if not df_termines.empty else pd.DataFrame()
     clv_moy_live = df_clv_ok['CLV'].mean() * 100 if not df_clv_ok.empty else None
     df_edge_ok = df_termines[df_termines['Edge'].notna()] if not df_termines.empty else pd.DataFrame()
     edge_moy = df_edge_ok['Edge'].mean() * 100 if not df_edge_ok.empty else None
@@ -289,6 +302,9 @@ elif section == "🔬 Back-test Historique":
         )
         if saisons_choisies:
             df_bt = df_bt[df_bt['saison'].isin(saisons_choisies)]
+        else:
+            st.warning("Sélectionnez au moins une saison.")
+            st.stop()
 
         df_bt = filtre_ligue_sidebar(df_bt, key="bt_ligue", label_toutes="Toutes")
         df_bt = filtre_marche_sidebar(df_bt, key="bt_marche", label_tous="Tous")

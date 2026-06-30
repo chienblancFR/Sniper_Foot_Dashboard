@@ -76,9 +76,15 @@ def afficher_alertes_chargement(statut: str, df: pd.DataFrame, msg_succes: str =
     if statut == "error":
         st.error("⚠️ Impossible de charger les données. Vérifiez l'URL source ou la connexion.")
         st.stop()
+    elif statut == "missing":
+        st.warning("⚠️ Fichier de données introuvable (URL distante et fichier local).")
+        st.stop()
     elif statut == "empty" or (statut == "ok" and df.empty):
         if msg_succes:
             st.info(msg_succes)
+        else:
+            st.info("Aucune donnée disponible pour le moment.")
+            st.stop()
     # statut == "ok" et df non vide : on ne fait rien, la page s'affiche normalement
 
 
