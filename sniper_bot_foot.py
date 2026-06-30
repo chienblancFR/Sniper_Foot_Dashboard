@@ -49,6 +49,15 @@ async def init_db():
         await db_conn.execute("ALTER TABLE xg_cache ADD COLUMN is_xg INTEGER DEFAULT 0")
     except Exception:
         pass  # Colonne déjà présente
+    # Migration : IDs d'équipes dans scores_matchs pour le MLE ρ par match
+    for migration in [
+        "ALTER TABLE scores_matchs ADD COLUMN team_dom_id INTEGER DEFAULT NULL",
+        "ALTER TABLE scores_matchs ADD COLUMN team_ext_id INTEGER DEFAULT NULL",
+    ]:
+        try:
+            await db_conn.execute(migration)
+        except Exception:
+            pass  # Colonne déjà présente
     # Migration : colonnes CLV enrichies (équipes Odds API + kickoff + flag notification)
     for migration in [
         "ALTER TABLE paris_log ADD COLUMN equipe_dom TEXT DEFAULT NULL",
@@ -238,45 +247,76 @@ RHO_DYNAMIQUE: dict[tuple, float] = {}  # clé = (ligue_id, saison)
 
 async def estimer_rho_saison(ligue_id: int, saison: int, mu_h: float, mu_a: float) -> float | None:
     """
-    Estimation MLE de ρ (Dixon-Coles) à partir des scores de faible xG accumulés
-    dans la table scores_matchs.
+    Estimation MLE de ρ (Dixon-Coles) à partir des scores accumulés dans scores_matchs.
 
-    La correction τ de Dixon-Coles n'affecte que les scores (0-0), (1-0), (0-1), (1-1).
-    On maximise donc la log-vraisemblance restreinte à ces 4 cellules, en utilisant
-    les moyennes de ligue (mu_h, mu_a) comme proxy des paramètres Poisson individuels.
+    La correction τ n'affecte que les 4 cellules {0,1}×{0,1}.
+    Amélioration vs approche naïve : on utilise les λ réels par match (xG de xg_cache)
+    au lieu d'un unique (μ_h, μ_a) ligue. Fallback sur μ_h / μ_a si xG absent.
 
-    Nécessite au minimum 30 matchs enregistrés pour être fiable.
+    Algorithme :
+      1. Charger tous les scores + IDs équipes
+      2. Batch-fetch des vrais xG depuis xg_cache (1 seule requête IN)
+      3. MLE avec τ(d, e, λ_h, λ_a) individuel par match
     """
     async with db_lock:
-        cursor = await db_conn.execute(
-            "SELECT buts_dom, buts_ext FROM scores_matchs WHERE ligue_id=? AND saison=?",
+        async with db_conn.execute(
+            "SELECT id_match, buts_dom, buts_ext, team_dom_id, team_ext_id "
+            "FROM scores_matchs WHERE ligue_id=? AND saison=?",
             (ligue_id, saison)
-        )
-        rows = await cursor.fetchall()
+        ) as cursor:
+            rows = await cursor.fetchall()
 
     if len(rows) < 30:
-        return None  # Pas assez de données
+        return None
 
-    n_00 = sum(1 for (d, e) in rows if d == 0 and e == 0)
-    n_10 = sum(1 for (d, e) in rows if d == 1 and e == 0)
-    n_01 = sum(1 for (d, e) in rows if d == 0 and e == 1)
-    n_11 = sum(1 for (d, e) in rows if d == 1 and e == 1)
+    # Batch-fetch des xG réels pour les matchs à faible score (seuls utiles pour τ)
+    # Clé xg_cache = "xg_{fixture_id}_{team_id}" ; xg_p = λ produit, xg_c = λ concédé
+    low_rows = [(fid, d, e, did, eid) for fid, d, e, did, eid in rows if d <= 1 and e <= 1]
+    xg_lookup: dict[str, tuple[float, float]] = {}
 
-    # MLE : maximise Σ log τ(score) pour les 4 cellules correctives
+    cles_dom = {f"xg_{r[0]}_{r[3]}" for r in low_rows if r[3]}
+    if cles_dom:
+        placeholders = ','.join('?' * len(cles_dom))
+        async with db_lock:
+            async with db_conn.execute(
+                f"SELECT cle, xg_p, xg_c FROM xg_cache WHERE cle IN ({placeholders}) AND is_xg=1",
+                list(cles_dom)
+            ) as cursor:
+                for cle, xg_p, xg_c in await cursor.fetchall():
+                    # xg_p = λ_home, xg_c = λ_away (perspective de l'équipe domicile)
+                    xg_lookup[cle] = (max(0.3, xg_p or mu_h), max(0.3, xg_c or mu_a))
+
+    # Construire les paires (λ_h, λ_a) par match — fallback sur μ ligue si absent
+    match_lambdas: list[tuple[int, int, float, float]] = []
+    for fid, d, e, dom_id, ext_id in low_rows:
+        cle_dom = f"xg_{fid}_{dom_id}" if dom_id else None
+        if cle_dom and cle_dom in xg_lookup:
+            lh, la = xg_lookup[cle_dom]
+        else:
+            lh, la = mu_h, mu_a
+        match_lambdas.append((d, e, lh, la))
+
+    if not match_lambdas:
+        return None
+
+    # MLE : maximise Σ log τ(d, e, λ_h, λ_a, ρ) sur les 4 cellules correctives
     def neg_ll(rho: float) -> float:
-        t00 = max(1e-9, 1.0 - mu_h * mu_a * rho)
-        t10 = max(1e-9, 1.0 + mu_a * rho)
-        t01 = max(1e-9, 1.0 + mu_h * rho)
-        t11 = max(1e-9, 1.0 - rho)
-        return -(n_00 * np.log(t00) + n_10 * np.log(t10) +
-                 n_01 * np.log(t01) + n_11 * np.log(t11))
+        ll = 0.0
+        for d, e, lh, la in match_lambdas:
+            if   d == 0 and e == 0: tau = max(1e-9, 1.0 - lh * la * rho)
+            elif d == 1 and e == 0: tau = max(1e-9, 1.0 + la * rho)
+            elif d == 0 and e == 1: tau = max(1e-9, 1.0 + lh * rho)
+            else:                   tau = max(1e-9, 1.0 - rho)          # 1-1
+            ll += np.log(tau)
+        return -ll
 
-    # ρ contraint entre -0.30 et -0.01 (valeurs empiriques réalistes)
     res = minimize_scalar(neg_ll, bounds=(-0.30, -0.01), method='bounded')
     if res.success:
         rho_est = round(res.x, 4)
+        n_xg = sum(1 for r in low_rows if f"xg_{r[0]}_{r[3]}" in xg_lookup)
         logging.info(f"[ρ MLE] ligue={ligue_id} saison={saison} "
-                     f"n={len(rows)} n_00={n_00} → ρ={rho_est}")
+                     f"n={len(rows)} n_low={len(match_lambdas)} "
+                     f"n_xg={n_xg} → ρ={rho_est}")
         return rho_est
     return None
 
@@ -1146,13 +1186,17 @@ async def collecter_scores_historiques(session, ligue, saison):
         lot = fixtures[i:i+20]
         async with db_lock:
             await db_conn.executemany(
-                "INSERT OR IGNORE INTO scores_matchs (id_match, ligue_id, saison, buts_dom, buts_ext) VALUES (?,?,?,?,?)",
+                "INSERT OR IGNORE INTO scores_matchs "
+                "(id_match, ligue_id, saison, buts_dom, buts_ext, team_dom_id, team_ext_id) "
+                "VALUES (?,?,?,?,?,?,?)",
                 [
                     (f['fixture']['id'],
                      f['league']['id'],
                      f['league']['season'],
                      f['goals']['home'],
-                     f['goals']['away'])
+                     f['goals']['away'],
+                     f['teams']['home']['id'],
+                     f['teams']['away']['id'])
                     for f in lot
                     if f['goals']['home'] is not None and f['goals']['away'] is not None
                 ]
@@ -1215,11 +1259,15 @@ async def verifier_resultats_matchs(session):
 
                 # Enregistrer le score pour l'estimation dynamique de ρ
                 ligue_id_match = f['league']['id']
-                saison_match = f['league']['season']
+                saison_match   = f['league']['season']
+                dom_id_match   = f['teams']['home']['id']
+                ext_id_match   = f['teams']['away']['id']
                 async with db_lock:
                     await db_conn.execute(
-                        "INSERT OR IGNORE INTO scores_matchs (id_match, ligue_id, saison, buts_dom, buts_ext) VALUES (?,?,?,?,?)",
-                        (id_m, ligue_id_match, saison_match, gh, ga)
+                        "INSERT OR IGNORE INTO scores_matchs "
+                        "(id_match, ligue_id, saison, buts_dom, buts_ext, team_dom_id, team_ext_id) "
+                        "VALUES (?,?,?,?,?,?,?)",
+                        (id_m, ligue_id_match, saison_match, gh, ga, dom_id_match, ext_id_match)
                     )
                     await db_conn.commit()
 
