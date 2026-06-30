@@ -85,10 +85,10 @@ def afficher_alertes_chargement(statut: str, df: pd.DataFrame, msg_succes: str =
 # ──────────────────────────────────────────────────────────────
 # 🔍  FILTRES SIDEBAR
 # ──────────────────────────────────────────────────────────────
-def filtre_temporel_sidebar(df: pd.DataFrame) -> pd.DataFrame:
+def filtre_temporel_sidebar(df: pd.DataFrame, key_prefix: str = "live") -> pd.DataFrame:
     """
     Ajoute un filtre temporel (7j / 30j / 90j / Tout) dans la sidebar.
-    Retourne le DataFrame filtré.
+    key_prefix évite les collisions entre onglets Live / Back-test.
     """
     if df.empty or 'Date' not in df.columns:
         return df
@@ -98,7 +98,7 @@ def filtre_temporel_sidebar(df: pd.DataFrame) -> pd.DataFrame:
         "Afficher les",
         options=["7 derniers jours", "30 derniers jours", "90 derniers jours", "Tout"],
         index=3,
-        key="filtre_periode"
+        key=f"{key_prefix}_filtre_periode",
     )
 
     if periode != "Tout":
@@ -106,6 +106,40 @@ def filtre_temporel_sidebar(df: pd.DataFrame) -> pd.DataFrame:
         date_min = pd.Timestamp.now() - pd.Timedelta(days=jours)
         df = df[df['Date'] >= date_min]
 
+    return df
+
+
+def filtre_ligue_sidebar(
+    df: pd.DataFrame,
+    key: str = "live_ligue",
+    label_toutes: str = "Toutes les Ligues",
+) -> pd.DataFrame:
+    """Filtre par compétition dans la sidebar."""
+    if df.empty or "Nom_Ligue" not in df.columns:
+        return df
+    ligues_dispo = sorted(df["Nom_Ligue"].unique().tolist())
+    ligue_choisie = st.sidebar.selectbox(
+        "🏆 Compétition :", [label_toutes] + ligues_dispo, key=key
+    )
+    if ligue_choisie != label_toutes:
+        df = df[df["Nom_Ligue"] == ligue_choisie]
+    return df
+
+
+def filtre_marche_sidebar(
+    df: pd.DataFrame,
+    key: str = "live_marche",
+    label_tous: str = "Tous les Marchés",
+) -> pd.DataFrame:
+    """Filtre par type de marché dans la sidebar."""
+    if df.empty or "Type_Marche" not in df.columns:
+        return df
+    marches_dispo = sorted(df["Type_Marche"].unique().tolist())
+    marche_choisi = st.sidebar.selectbox(
+        f"📊 Marché ciblé :", [label_tous] + marches_dispo, key=key
+    )
+    if marche_choisi != label_tous:
+        df = df[df["Type_Marche"] == marche_choisi]
     return df
 
 
@@ -252,6 +286,38 @@ def creer_graphique_pl_marche(
         xaxis_title=titre_x,
         yaxis_title=titre_y,
         showlegend=False,
+    )
+    appliquer_theme_dark(fig)
+    return fig
+
+
+def creer_graphique_clv_cumule(
+    df_clv: pd.DataFrame,
+    col_marche: str = "Type_Marche",
+) -> go.Figure:
+    """CLV moyen cumulé par marché — axe X = Date si disponible."""
+    fig = go.Figure()
+    couleurs = {"Totals (Buts)": "#FF4500", "Handicap Asiatique": "#00BFFF"}
+    a_dates = "Date" in df_clv.columns and df_clv["Date"].notna().any()
+
+    for marche in df_clv[col_marche].unique():
+        df_cat = df_clv[df_clv[col_marche] == marche].sort_values("Date").reset_index(drop=True)
+        df_cat["CLV_Pct"] = df_cat["CLV"] * 100
+        df_cat["CLV_Moy_Cumulee"] = df_cat["CLV_Pct"].expanding().mean()
+        axe_x = df_cat["Date"] if a_dates else df_cat.index
+        fig.add_trace(go.Scatter(
+            x=axe_x,
+            y=df_cat["CLV_Moy_Cumulee"],
+            mode="lines",
+            name=marche,
+            line=dict(color=couleurs.get(marche, "#FFFFFF"), width=2.5),
+        ))
+
+    fig.add_hline(y=0, line_dash="dash", line_color="#FFFFFF", opacity=0.5)
+    fig.update_layout(
+        yaxis_title="Beat The Close moyen (%)",
+        xaxis_title="Date du pari" if a_dates else "Volume de paris",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     appliquer_theme_dark(fig)
     return fig

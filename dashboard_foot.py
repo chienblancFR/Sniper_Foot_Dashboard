@@ -1,6 +1,5 @@
 import os
 
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -12,7 +11,10 @@ from utils import (
     calculer_max_drawdown,
     convertir_dates,
     creer_graphique_bankroll,
+    creer_graphique_clv_cumule,
     creer_graphique_pl_marche,
+    filtre_ligue_sidebar,
+    filtre_marche_sidebar,
     filtre_temporel_sidebar,
     nettoyer_colonnes_numeriques,
     preparer_df_backtest,
@@ -44,17 +46,37 @@ LIGUE_NOMS = {
     136: "Serie B",
 }
 
+
+def _charger_csv(url: str, fichier_local: str):
+    """Tente l'URL distante, puis le fichier local."""
+    try:
+        df = pd.read_csv(url)
+        if not df.empty:
+            return df, "ok", f"PA · {fichier_local}"
+    except Exception:
+        pass
+
+    local_path = os.path.join(os.getcwd(), fichier_local)
+    if os.path.exists(local_path):
+        try:
+            df = pd.read_csv(local_path)
+            if not df.empty:
+                return df, "ok", f"local · {fichier_local}"
+            return df, "empty", f"local · {fichier_local} (vide)"
+        except Exception:
+            return pd.DataFrame(), "error", f"local · {fichier_local}"
+
+    return pd.DataFrame(), "missing", "introuvable"
+
+
 # ==========================================
 # 📥 CHARGEMENT DES DONNÉES
 # ==========================================
 @st.cache_data(ttl=60)
 def load_football_data():
-    try:
-        df = pd.read_csv(URL_FOOT)
-    except Exception:
-        return pd.DataFrame(), "error"
-    if df.empty:
-        return df, "empty"
+    df, statut, source = _charger_csv(URL_FOOT, "historique_sniper.csv")
+    if statut != "ok":
+        return df, statut, source
     colonnes_numeriques = ["Cote_Prise", "Mise", "Cote_Cloture", "Edge", "Prob_Modele", "CLV", "Profit_Unites"]
     df = nettoyer_colonnes_numeriques(df, colonnes_numeriques)
     df = convertir_dates(df)
@@ -62,78 +84,63 @@ def load_football_data():
         lambda x: "Totals (Buts)" if "[totals]" in str(x) else "Handicap Asiatique"
     )
     df['Nom_Ligue'] = df['Ligue'].apply(lambda x: str(x).split(" [")[0])
-    return df, "ok"
+    return df, "ok", source
 
 
 @st.cache_data(ttl=300)
 def load_backtest_data():
-    """
-    Charge backtest_results.csv — tente d'abord l'URL PythonAnywhere,
-    puis le fichier local en fallback.
-    """
-    df = pd.DataFrame()
-    # 1) Tentative via URL distante
-    try:
-        df = pd.read_csv(URL_BACKTEST)
-    except Exception:
-        pass
-
-    # 2) Fallback fichier local
-    if df.empty:
-        local_path = os.path.join(os.getcwd(), "backtest_results.csv")
-        if not os.path.exists(local_path):
-            return pd.DataFrame(), "missing"
-        try:
-            df = pd.read_csv(local_path)
-        except Exception:
-            return pd.DataFrame(), "error"
-
-    if df.empty:
-        return df, "empty"
+    df, statut, source = _charger_csv(URL_BACKTEST, "backtest_results.csv")
+    if statut != "ok":
+        return df, statut, source
 
     df['Nom_Ligue'] = df['ligue_id'].map(LIGUE_NOMS).fillna(df['ligue_id'].astype(str))
     df['Type_Marche'] = df['market'].map(
         {'spreads': 'Handicap Asiatique', 'totals': 'Totaux (Buts)'}
     )
     df = preparer_df_backtest(df)
-    return df, "ok"
+    return df, "ok", source
 
-
-df, statut_chargement = load_football_data()
 
 # ==========================================
-# 🗂️ ONGLETS PRINCIPAUX
+# 🎛️ SIDEBAR — CONTRÔLES GLOBAUX
 # ==========================================
-tab_live, tab_backtest = st.tabs(["📡 Live Performance", "🔬 Back-test Historique"])
+st.sidebar.header("⚙️ Contrôles")
+if st.sidebar.button("🔄 Rafraîchir les données", use_container_width=True):
+    load_football_data.clear()
+    load_backtest_data.clear()
+    st.rerun()
+
+section = st.sidebar.radio(
+    "Navigation",
+    ["📡 Live Performance", "🔬 Back-test Historique"],
+    key="dash_section",
+)
+
+df, statut_chargement, src_live = load_football_data()
+df_bt, statut_bt, src_bt = load_backtest_data()
+
+st.caption(
+    f"📡 Live : **{src_live}** (cache 60 s) · "
+    f"🔬 Back-test : **{src_bt}** (cache 300 s) · "
+    f"Section : **{section.split(' ', 1)[1]}**"
+)
 
 
 # ══════════════════════════════════════════
 # TAB 1 — LIVE PERFORMANCE
 # ══════════════════════════════════════════
-with tab_live:
+if section == "📡 Live Performance":
     afficher_alertes_chargement(
         statut_chargement, df,
         msg_succes="⚽ Le radar Football V25 est armé. En attente des premières transactions..."
     )
 
-    # ── Filtres sidebar ──────────────────────────────────────
     st.sidebar.markdown("---")
-    st.sidebar.header("🎯 Filtres Écran Principal")
-    df_live = filtre_temporel_sidebar(df)
+    st.sidebar.header("🎯 Filtres Live")
+    df_live = filtre_temporel_sidebar(df, key_prefix="live")
+    df_live = filtre_ligue_sidebar(df_live, key="live_ligue")
+    df_live = filtre_marche_sidebar(df_live, key="live_marche")
 
-    if not df_live.empty and "Nom_Ligue" in df_live.columns:
-        ligues_dispo = sorted(df_live["Nom_Ligue"].unique().tolist())
-        ligue_choisie = st.sidebar.selectbox("🏆 Compétition :", ["Toutes les Ligues"] + ligues_dispo)
-        if ligue_choisie != "Toutes les Ligues":
-            df_live = df_live[df_live["Nom_Ligue"] == ligue_choisie]
-
-    if not df_live.empty and "Type_Marche" in df_live.columns:
-        marches_dispo = sorted(df_live["Type_Marche"].unique().tolist())
-        marche_choisi = st.sidebar.selectbox("📊 Marché ciblé :", ["Tous les Marchés"] + marches_dispo)
-        if marche_choisi != "Tous les Marchés":
-            df_live = df_live[df_live["Type_Marche"] == marche_choisi]
-
-    # ── KPIs ─────────────────────────────────────────────────
     df_termines = df_live[df_live['Statut'].isin(['WON', 'HALF-WON', 'VOID', 'HALF-LOST', 'LOST'])].copy()
     df_attente  = df_live[df_live['Statut'] == 'PENDING'].copy()
 
@@ -151,16 +158,30 @@ with tab_live:
     if not df_termines.empty:
         df_termines, max_dd_pct = calculer_max_drawdown(df_termines, 'Profit_Unites', CAPITAL_INITIAL)
 
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Capital Actuel",       f"{capital_actuel:.2f} U", f"{total_pl:.2f} U")
-    col2.metric("ROI",                  f"{roi:.2f} %")
-    col3.metric("Winrate (Hors Void)",  f"{winrate:.1f} %")
-    col4.metric("Max Drawdown",         f"{max_dd_pct:.1f} %")
-    col5.metric("Ordres en Cours",      f"{len(df_attente)}")
+    df_clv_ok = df_termines[df_termines['CLV'].notna() & (df_termines['CLV'] != 0)] if not df_termines.empty else pd.DataFrame()
+    clv_moy_live = df_clv_ok['CLV'].mean() * 100 if not df_clv_ok.empty else None
+    df_edge_ok = df_termines[df_termines['Edge'].notna()] if not df_termines.empty else pd.DataFrame()
+    edge_moy = df_edge_ok['Edge'].mean() * 100 if not df_edge_ok.empty else None
+
+    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+    c1.metric("Capital Actuel",       f"{capital_actuel:.2f} U", f"{total_pl:+.2f} U")
+    c2.metric("ROI",                  f"{roi:.2f} %")
+    c3.metric("Winrate (Hors Void)",  f"{winrate:.1f} %")
+    c4.metric("Max Drawdown",         f"{max_dd_pct:.1f} %")
+    c5.metric("Ordres en Cours",      f"{len(df_attente)}")
+    c6.metric(
+        "CLV moyen",
+        f"{clv_moy_live:+.2f} %" if clv_moy_live is not None else "N/A",
+        help=f"Sur {len(df_clv_ok)} paris clôturés avec CLV",
+    )
+    c7.metric(
+        "Edge moyen",
+        f"{edge_moy:+.2f} %" if edge_moy is not None else "N/A",
+        help=f"Sur {len(df_edge_ok)} paris avec edge enregistré",
+    )
 
     st.markdown("---")
 
-    # ── Courbe de croissance ──────────────────────────────────
     st.subheader("📈 Évolution du Capital (Stratégie Hybride Foot)")
     if not df_termines.empty:
         fig_bankroll = creer_graphique_bankroll(
@@ -175,7 +196,6 @@ with tab_live:
 
     col_gauche, col_droite = st.columns(2)
 
-    # ── P&L par marché ────────────────────────────────────────
     with col_gauche:
         st.subheader("🎯 Rentabilité et Volume par Type de Pari")
         if not df_termines.empty:
@@ -190,43 +210,20 @@ with tab_live:
         else:
             st.write("Données insuffisantes.")
 
-    # ── CLV par marché ────────────────────────────────────────
     with col_droite:
         st.subheader("⚖️ Validation Mathématique : CLV par Marché")
-        if not df_termines.empty:
-            df_clv = df_termines[df_termines['CLV'] != 0.0].copy()
-            if not df_clv.empty:
-                fig_clv = go.Figure()
-                couleurs = {"Totals (Buts)": "#FF4500", "Handicap Asiatique": "#00BFFF"}
-                for marche in df_clv['Type_Marche'].unique():
-                    df_cat = df_clv[df_clv['Type_Marche'] == marche].sort_values("Date").reset_index(drop=True)
-                    df_cat['CLV_Pct'] = df_cat['CLV'] * 100
-                    df_cat['CLV_Moy_Cumulee'] = df_cat['CLV_Pct'].expanding().mean()
-                    fig_clv.add_trace(go.Scatter(
-                        x=df_cat.index, y=df_cat['CLV_Moy_Cumulee'],
-                        mode='lines', name=marche,
-                        line=dict(color=couleurs.get(marche, "#FFFFFF"), width=2.5)
-                    ))
-                fig_clv.add_hline(y=0, line_dash="dash", line_color="#FFFFFF", opacity=0.5)
-                fig_clv.update_layout(
-                    yaxis_title="Beat The Close moyen (%)",
-                    xaxis_title="Volume de Paris par marché",
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                )
-                appliquer_theme_dark(fig_clv)
-                st.plotly_chart(fig_clv, use_container_width=True)
-            else:
-                st.write("En attente de données de clôture Pinnacle.")
+        if not df_clv_ok.empty:
+            fig_clv = creer_graphique_clv_cumule(df_clv_ok)
+            st.plotly_chart(fig_clv, use_container_width=True)
+        elif not df_termines.empty:
+            st.write("En attente de données de clôture Pinnacle.")
         else:
             st.write("Données insuffisantes.")
 
-    # ── Paris en attente ──────────────────────────────────────
     st.markdown("---")
     st.subheader("📡 Radar Football : Signaux Actifs / En attente de dénouement")
     if not df_attente.empty:
         df_att_display = df_attente.copy()
-
-        # CLV temps réel : colorée si disponible
         colonnes_attente = ["Date", "Nom_Ligue", "Equipe", "Handicap", "Cote_Prise", "Mise", "Edge"]
         if "CLV" in df_att_display.columns:
             colonnes_attente.append("CLV")
@@ -254,16 +251,17 @@ with tab_live:
     else:
         st.success("Aucun ordre en cours sur les marchés. Le Sniper est en veille.")
 
-    # ── 10 derniers résultats ──────────────────────────────────
     st.markdown("---")
     st.subheader("📰 Journal de bord : 10 dernières rencontres clôturées")
     if not df_termines.empty:
         df_derniers = df_termines.sort_values("Date", ascending=False).head(10)
         colonnes_hist = ["Date", "Nom_Ligue", "Equipe", "Handicap", "Cote_Prise", "Mise", "Statut", "Profit_Unites"]
+
         def style_statut(val):
             if val in ['WON', 'HALF-WON']:   return 'color: #00FF00; font-weight: bold'
             elif val in ['LOST', 'HALF-LOST']: return 'color: #FF4500; font-weight: bold'
             return 'color: #FFFFFF; opacity: 0.5'
+
         st.dataframe(
             df_derniers[colonnes_hist].style.map(style_statut, subset=['Statut']),
             use_container_width=True
@@ -273,40 +271,28 @@ with tab_live:
 # ══════════════════════════════════════════
 # TAB 2 — BACK-TEST HISTORIQUE
 # ══════════════════════════════════════════
-with tab_backtest:
-    df_bt, statut_bt = load_backtest_data()
-
+elif section == "🔬 Back-test Historique":
     if statut_bt == "missing":
         st.warning(
             "Aucun fichier `backtest_results.csv` trouvé. "
-            "Lance `python backtest_football.py` pour générer les données."
+            "Lance `python backtest_football.py --report` pour générer les données."
         )
     elif statut_bt in ("error", "empty"):
         st.error("Erreur lors du chargement des données de back-test.")
     else:
-        # ── Filtres sidebar back-test ─────────────────────────────
         st.sidebar.markdown("---")
         st.sidebar.header("🔬 Filtres Back-test")
 
         saisons_dispo = sorted(df_bt['saison'].unique().tolist())
         saisons_choisies = st.sidebar.multiselect(
-            "📅 Saison(s) :", saisons_dispo, default=saisons_dispo
+            "📅 Saison(s) :", saisons_dispo, default=saisons_dispo, key="bt_saisons"
         )
         if saisons_choisies:
             df_bt = df_bt[df_bt['saison'].isin(saisons_choisies)]
 
-        ligues_bt = sorted(df_bt['Nom_Ligue'].unique().tolist())
-        ligue_bt = st.sidebar.selectbox("🏆 Ligue :", ["Toutes"] + ligues_bt, key="bt_ligue")
-        if ligue_bt != "Toutes":
-            df_bt = df_bt[df_bt['Nom_Ligue'] == ligue_bt]
+        df_bt = filtre_ligue_sidebar(df_bt, key="bt_ligue", label_toutes="Toutes")
+        df_bt = filtre_marche_sidebar(df_bt, key="bt_marche", label_tous="Tous")
 
-        marche_bt = st.sidebar.selectbox(
-            "📊 Marché :", ["Tous", "Handicap Asiatique", "Totaux (Buts)"], key="bt_marche"
-        )
-        if marche_bt != "Tous":
-            df_bt = df_bt[df_bt['Type_Marche'] == marche_bt]
-
-        # Séparer résultats résolus / en attente (tri chronologique conservé)
         df_bt_res = df_bt[df_bt['resultat'].notna()].copy()
         if 'Date' in df_bt_res.columns:
             df_bt_res = df_bt_res.sort_values('Date').reset_index(drop=True)
@@ -318,7 +304,6 @@ with tab_backtest:
                 "`python backtest_football.py --report` pour l'axe dates."
             )
 
-        # ── KPIs ─────────────────────────────────────────────────
         st.subheader("📊 Vue d'ensemble — Back-test Dixon-Coles")
 
         total_signaux = len(df_bt_res)
@@ -330,17 +315,17 @@ with tab_backtest:
         wr_bt         = (wins_bt / total_signaux * 100) if total_signaux > 0 else 0
         dd            = calculer_drawdown_serie(df_bt_res['Profit_Unites'], CAPITAL_INITIAL)
 
-        c1, c2, c3, c4, c5 = st.columns(5)
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
         c1.metric("Signaux générés",  f"{total_signaux}")
         c2.metric("P&L total",        f"{total_pnl:+.1f} u")
         c3.metric("ROI",              f"{roi_bt:+.2f} %")
-        c4.metric("CLV moyen",        f"{clv_moy:+.2f} %")
-        c5.metric("Max Drawdown",     f"{dd:.1f} %")
+        c4.metric("Win rate",         f"{wr_bt:.1f} %")
+        c5.metric("CLV moyen",        f"{clv_moy:+.2f} %")
+        c6.metric("Max Drawdown",     f"{dd:.1f} %")
 
         st.markdown("---")
         col_a, col_b = st.columns(2)
 
-        # ── Courbe de bankroll back-test ──────────────────────────
         with col_a:
             st.subheader("📈 Courbe de Capital (Back-test)")
             if not df_bt_res.empty:
@@ -368,7 +353,6 @@ with tab_backtest:
             else:
                 st.info("Aucune donnée à afficher.")
 
-        # ── ROI par ligue ─────────────────────────────────────────
         with col_b:
             st.subheader("🏆 ROI & CLV par Ligue")
             if not df_bt_res.empty:
@@ -413,7 +397,6 @@ with tab_backtest:
         st.markdown("---")
         col_c, col_d = st.columns(2)
 
-        # ── Calibration EV ────────────────────────────────────────
         with col_c:
             st.subheader("🎯 Calibration du Modèle")
             st.caption("Fréquence de victoire réelle vs EV détecté — un modèle bien calibré doit suivre la droite.")
@@ -457,7 +440,6 @@ with tab_backtest:
             else:
                 st.info("Colonne `ev_modele` non trouvée dans le CSV.")
 
-        # ── P&L par marché ────────────────────────────────────────
         with col_d:
             st.subheader("📊 P&L par Marché")
             if not df_bt_res.empty:
@@ -485,7 +467,6 @@ with tab_backtest:
             else:
                 st.info("Aucune donnée à afficher.")
 
-        # ── Tableau détaillé par ligue ────────────────────────────
         st.markdown("---")
         st.subheader("📋 Tableau de Synthèse par Ligue")
         if not df_bt_res.empty:
