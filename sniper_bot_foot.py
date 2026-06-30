@@ -1,4 +1,4 @@
-import requests, json, os, time, logging, csv, signal
+import requests, json, os, time, logging, csv, signal, shutil
 import numpy as np
 from scipy.stats import poisson
 from scipy.optimize import minimize_scalar, minimize
@@ -2450,6 +2450,7 @@ async def main_loop():
     dernier_retest_xg = None
     dernier_collecte_scores = None
     dernier_dc = None
+    dernier_backup = None
     async with aiohttp.ClientSession() as session:
         await detecter_ligues_sans_xg(session)
         for lg in CHAMPIONNATS:
@@ -2460,6 +2461,28 @@ async def main_loop():
     while True:
         try:
             maintenant = datetime.now(timezone.utc)
+
+            # Backup quotidien de la DB (rotation sur 7 jours)
+            if dernier_backup is None or (maintenant - dernier_backup).total_seconds() > 86400:
+                try:
+                    backup_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backups")
+                    os.makedirs(backup_dir, exist_ok=True)
+                    date_str = maintenant.strftime("%Y-%m-%d")
+                    dest = os.path.join(backup_dir, f"sniper_data_{date_str}.db")
+                    # Flush aiosqlite avant la copie
+                    async with db_lock:
+                        await db_conn.commit()
+                    shutil.copy2("sniper_data.db", dest)
+                    # Rotation : garder seulement les 7 derniers backups
+                    backups = sorted(
+                        [f for f in os.listdir(backup_dir) if f.startswith("sniper_data_") and f.endswith(".db")]
+                    )
+                    for old in backups[:-7]:
+                        os.remove(os.path.join(backup_dir, old))
+                    log_info(f"💾 Backup DB : {dest} ({len(backups)} fichiers, rotation 7j).")
+                except Exception as e:
+                    log_info(f"⚠️ Backup DB échoué : {e}")
+                dernier_backup = maintenant
 
             # Retest quotidien xG : si une ligue commence à fournir des xG en cours de saison,
             # le bot le détecte sans redémarrage.
