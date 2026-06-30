@@ -66,9 +66,16 @@ RHO_DEFAULT  = -0.12
 KELLY_FRAC      = 0.05   # fraction Kelly (5% — aligné avec le bot)
 MIN_COTE        = 1.70   # ignorer les handicaps trop courts (< 1.70)
 N_PRIOR_DEFAULT = 8      # fallback shrinkage bayésien (valeur par ligue dans CHAMPIONNATS)
-# Poids du modèle dans le blend EV à H-24 : poids_dyn = 0.15 + 0.15*(24/168) ≈ 0.171
-# Réplique la pondération dynamique du bot pour les paris pris environ 24h avant le coup d'envoi.
-POIDS_DYN_H24   = 0.171
+# Cotes backtest collectées à H-24 (table bt_odds_h24)
+H_ODDS_BACKTEST = 24.0
+
+
+def calculer_poids_dyn(hr: float) -> float:
+    """
+    Poids du modèle dans le blend EV — identique au bot live (sniper_bot_foot.py).
+    Fenêtre [0.9h, 36h] : 10% (marché sharp) → 30% (signal modèle plus libre).
+    """
+    return 0.10 + 0.20 * min(1.0, (hr - 0.9) / (36.0 - 0.9))
 
 NAME_MAPPING = {
     # 🇫🇷 LIGUE 1
@@ -913,7 +920,7 @@ async def simuler_paris(conn):
     print(f"  📋 Fixtures avec résultat : {n_fix}")
     print(f"  📊 Cotes H-24 en base     : {n_odds}")
     print(f"  🎯 Entrées xG en base     : {n_xg}")
-    print("  🧮 Modèle : blend 50/50 DC (MLE α/β/γ/ρ) + xG venue-normalisé (aligné bot live)")
+    print("  🧮 Modèle : blend 50/50 DC + xG, poids_dyn dynamique (formule bot live)")
 
     if n_odds == 0:
         print("\n  ⚠️  AUCUNE cote H-24 trouvée — la collecte d'odds a échoué.")
@@ -1017,6 +1024,9 @@ async def simuler_paris(conn):
                 if mk == 'spreads':
                     partner_cote[(mk, hv)] = c
 
+            # Blend EV dynamique — à H-24 : poids_dyn ≈ 23.2% (formule bot recalibrée)
+            poids_dyn = calculer_poids_dyn(H_ODDS_BACKTEST)
+
             for market, outcome, h_val, cote_h24 in odds_h24:
                 # Handicap Asiatique uniquement — les Totaux n'ont pas d'edge démontré
                 if market != 'spreads':
@@ -1042,7 +1052,7 @@ async def simuler_paris(conn):
                 else:
                     ev_pinnacle = ev_modele  # fallback si partenaire absent
 
-                ev_final = ev_modele * POIDS_DYN_H24 + ev_pinnacle * (1.0 - POIDS_DYN_H24)
+                ev_final = ev_modele * poids_dyn + ev_pinnacle * (1.0 - poids_dyn)
 
                 if not (ev_min_l <= ev_final <= ev_max_l):
                     continue
