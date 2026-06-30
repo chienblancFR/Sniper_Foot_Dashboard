@@ -7,6 +7,23 @@ Usage :
   python backtest_football.py --report     # Phase 3 : génère le rapport
   python backtest_football.py              # Les 3 phases d'un coup
 
+Reset (avant de relancer le backtest / dashboard) :
+  python backtest_football.py --reset
+      → Vide bt_signaux + supprime backtest_results.csv
+      → Garde backtest_data.db (fixtures, cotes, xG) — pas d'appel API
+      → Puis : python backtest_football.py --simulate --report
+
+  python backtest_football.py --reset-full
+      → Supprime backtest_data.db + backtest_results.csv (tout effacer)
+      → Puis : python backtest_football.py --collect --simulate --report
+      → Consomme le quota API
+
+  python backtest_football.py --reset --simulate --report
+      → Reset soft + regénération en une commande
+
+Dashboard Streamlit : après --report, menu ⋮ → Clear cache → Rerun
+Si le CSV distant PythonAnywhere est utilisé, uploader le nouveau backtest_results.csv.
+
 Résultats dans backtest_results.csv et imprimés dans la console.
 """
 
@@ -1252,17 +1269,75 @@ async def generer_rapport(conn):
     print("\n✅ Phase 3 terminée.")
 
 
+async def reset_backtest(full: bool = False):
+    """
+    Reset des résultats backtest pour le dashboard Streamlit.
+
+    full=False (--reset)       : vide bt_signaux + supprime backtest_results.csv
+    full=True  (--reset-full)  : supprime aussi backtest_data.db (recollecte requise)
+    """
+    print("\n" + "=" * 60)
+    print("RESET BACKTEST")
+    print("=" * 60)
+
+    csv_path = "backtest_results.csv"
+    if os.path.exists(csv_path):
+        os.remove(csv_path)
+        print(f"  [OK] {csv_path} supprime")
+    else:
+        print(f"  [--] {csv_path} absent (OK)")
+
+    if full:
+        if os.path.exists(DB_PATH):
+            os.remove(DB_PATH)
+            print(f"  [OK] {DB_PATH} supprimee (fixtures, cotes H-24, xG effaces)")
+        else:
+            print(f"  [--] {DB_PATH} absente (OK)")
+        print("\n  >> Reset COMPLET — prochaine etape (consomme le quota API) :")
+        print("      python backtest_football.py --collect --simulate --report")
+        return
+
+    if not os.path.exists(DB_PATH):
+        print(f"  [--] {DB_PATH} absente — rien a vider en DB")
+        print("\n  >> Prochaine etape : python backtest_football.py --collect --simulate --report")
+        return
+
+    async with aiosqlite.connect(DB_PATH) as conn:
+        async with conn.execute("SELECT COUNT(*) FROM bt_signaux") as cur:
+            n_before = (await cur.fetchone())[0]
+        await conn.execute("DELETE FROM bt_signaux")
+        await conn.commit()
+
+    print(f"  [OK] bt_signaux videe ({n_before} signaux supprimes)")
+    print("\n  >> Prochaine etape (sans API) :")
+    print("      python backtest_football.py --simulate --report")
+    print("  >> Dashboard : menu Clear cache puis Rerun")
+
+
 # ─────────────────────────────────────────────────────────────
 # 🚀  POINT D'ENTRÉE
 # ─────────────────────────────────────────────────────────────
 async def main():
     parser = argparse.ArgumentParser(description="Back-test Dixon-Coles Football")
-    parser.add_argument('--collect',  action='store_true', help='Phase 1 : collecte données')
-    parser.add_argument('--simulate', action='store_true', help='Phase 2 : simulation')
-    parser.add_argument('--report',   action='store_true', help='Phase 3 : rapport')
+    parser.add_argument('--collect',    action='store_true', help='Phase 1 : collecte données')
+    parser.add_argument('--simulate',   action='store_true', help='Phase 2 : simulation')
+    parser.add_argument('--report',     action='store_true', help='Phase 3 : rapport + export CSV')
+    parser.add_argument('--reset',      action='store_true',
+                        help='Vide bt_signaux + supprime backtest_results.csv (garde la DB)')
+    parser.add_argument('--reset-full', action='store_true',
+                        help='Supprime backtest_data.db + CSV (recollecte API requise)')
     args = parser.parse_args()
 
-    all_phases = not (args.collect or args.simulate or args.report)
+    if args.reset_full:
+        await reset_backtest(full=True)
+    elif args.reset:
+        await reset_backtest(full=False)
+
+    run_phases = args.collect or args.simulate or args.report
+    all_phases = not run_phases and not args.reset and not args.reset_full
+
+    if not run_phases and not all_phases:
+        return
 
     async with aiosqlite.connect(DB_PATH) as conn:
         await init_db(conn)
