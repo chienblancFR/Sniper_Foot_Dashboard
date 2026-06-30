@@ -1692,15 +1692,19 @@ async def analyser_un_match(session, m, ligue, saison_correcte, sos_map, sos_att
 
     for market in pinnacle['markets']:
         market_key_prelim = market['key']
-        if market_key_prelim != 'spreads':
+        if market_key_prelim not in ('spreads', 'totals'):
             continue
         for out in market.get('outcomes', []):
             try:
                 h_prelim = float(out.get('point', 0))
                 cote_prelim = float(out['price'])
 
-                is_h_odds_prelim = (out['name'] == home_team_odds)
-                ev_prelim = calculer_ev_ah(mat_preliminaire, h_prelim, is_h_odds_prelim, cote_prelim)
+                if market_key_prelim == 'spreads':
+                    is_h_odds_prelim = (out['name'] == home_team_odds)
+                    ev_prelim = calculer_ev_ah(mat_preliminaire, h_prelim, is_h_odds_prelim, cote_prelim)
+                else:
+                    is_over_prelim = out['name'].lower() == 'over'
+                    ev_prelim = calculer_ev_total_asiatique(mat_preliminaire, h_prelim, is_over_prelim, cote_prelim)
 
                 if ev_prelim > -0.05:
                     match_potentiel = True
@@ -1739,41 +1743,39 @@ async def analyser_un_match(session, m, ligue, saison_correcte, sos_map, sos_att
             mat_lineup_drop = generer_matrice_dixon(max(0.4, L_A_drop), max(0.4, L_B_drop), ligue['id'], saison_correcte)
             alerte_lineup_text = f"🔄 ROTATION MASSIVE DÉTECTÉE (Dom: {force_lineup_d:.2f}x | Ext: {force_lineup_e:.2f}x)"
 
-    # 🎯 PARCOURS DES MARCHÉS — Handicap Asiatique uniquement
+    # 🔒 1 seul pari actif par match — spreads + totaux confondus
+    async with db_lock:
+        async with db_conn.execute(
+            "SELECT id_match FROM paris_log WHERE id_match=? AND statut='PENDING'",
+            (id_m,)
+        ) as cursor:
+            deja_parie_ce_match = await cursor.fetchone()
+
+    if deja_parie_ce_match:
+        return
+
+    # Matrice active (rotation ou normale) + seuil EV adapté
+    if mat_lineup_drop is not None:
+        mat_actif = mat_lineup_drop
+        ev_min_rotation = ev_min_effectif + 0.02
+    else:
+        mat_actif = mat
+        ev_min_rotation = ev_min_effectif
+
+    # Collecte de tous les candidats (AH + Totaux) → meilleur EV global
+    candidats = []
     for market in pinnacle['markets']:
         market_key = market['key']
-        if market_key != 'spreads':
+        if market_key not in ('spreads', 'totals'):
             continue
         outcomes = market['outcomes']
 
-        # Vérifier une seule fois si un pari PENDING existe déjà sur ce match
-        async with db_lock:
-            async with db_conn.execute(
-                "SELECT id_match FROM paris_log WHERE id_match=? AND statut='PENDING'",
-                (id_m,)
-            ) as cursor:
-                deja_parie_ce_match = await cursor.fetchone()
-
-        if deja_parie_ce_match:
-            continue  # 🔒 1 seul pari actif par match — tracker_clv_async gère le suivi
-
-        # Matrice active (rotation ou normale) + seuil EV adapté
-        if mat_lineup_drop is not None:
-            mat_actif = mat_lineup_drop
-            ev_min_rotation = ev_min_effectif + 0.02
-        else:
-            mat_actif = mat
-            ev_min_rotation = ev_min_effectif
-
-        # Collecte de tous les spreads valides pour choisir le meilleur EV
-        candidats = []
         for out in outcomes:
             h, cote, nom = float(out['point']), float(out['price']), out['name']
 
             if cote < 1.70:
                 continue  # Cotes courtes : ratio edge/bruit défavorable (aligné backtest)
 
-            # Pari exact déjà en log → skip (le tracker_clv_async gère la mise à jour CLV)
             async with db_lock:
                 async with db_conn.execute(
                     "SELECT cote_prise FROM paris_log WHERE id_match=? AND equipe=? AND handicap=?",
@@ -1782,67 +1784,83 @@ async def analyser_un_match(session, m, ligue, saison_correcte, sos_map, sos_att
                     if await cursor.fetchone():
                         continue
 
-            is_h_odds = (nom == home_team_odds)
-
-            # Dévigging proportionnel : chercher la cote partenaire de la même ligne
-            # (même |handicap|, équipe adverse) pour calculer l'overround exact de cette ligne.
-            # fair_odds = market_odds × ovr  (ovr > 1 → les fair odds sont AU-DESSUS du marché)
-            cote_partenaire = next(
-                (float(o['price']) for o in outcomes
-                 if o['name'] != nom and abs(float(o.get('point', 0)) + h) < 0.01),
-                None
-            )
-            if cote_partenaire and cote_partenaire > 1.0:
-                ovr_ligne = (1.0 / cote) + (1.0 / cote_partenaire)
-                cote_novig = cote * ovr_ligne   # méthode proportionnelle correcte
+            if market_key == 'spreads':
+                is_h_odds = (nom == home_team_odds)
+                cote_partenaire = next(
+                    (float(o['price']) for o in outcomes
+                     if o['name'] != nom and abs(float(o.get('point', 0)) + h) < 0.01),
+                    None
+                )
+                if cote_partenaire and cote_partenaire > 1.0:
+                    ovr_ligne = (1.0 / cote) + (1.0 / cote_partenaire)
+                    cote_novig = cote * ovr_ligne
+                else:
+                    cote_novig = cote
+                ev_modele = calculer_ev_ah(mat_actif, h, is_h_odds, cote)
+                ev_pinnacle = calculer_ev_ah(mat_actif, h, is_h_odds, cote_novig)
+                kelly_theorique = calculer_kelly_ah(mat_actif, h, is_h_odds, cote)
+                market_label = "🏆 HANDICAP"
+                pari_display = f"{nom} ({h:+g})"
             else:
-                cote_novig = cote               # pas de partenaire détecté → pas de dévigging
+                is_over = nom.lower() == 'over'
+                cote_partenaire = next(
+                    (float(o['price']) for o in outcomes
+                     if o['name'] != nom and abs(float(o.get('point', 0)) - h) < 0.01),
+                    None
+                )
+                if cote_partenaire and cote_partenaire > 1.0:
+                    ovr_ligne = (1.0 / cote) + (1.0 / cote_partenaire)
+                    cote_novig = cote * ovr_ligne
+                else:
+                    cote_novig = cote
+                ev_modele = calculer_ev_total_asiatique(mat_actif, h, is_over, cote)
+                ev_pinnacle = calculer_ev_total_asiatique(mat_actif, h, is_over, cote_novig)
+                kelly_theorique = calculer_kelly_total(mat_actif, h, is_over, cote)
+                market_label = "⚽ TOTAL"
+                pari_display = f"{nom} {h:g}"
 
-            ev_modele  = calculer_ev_ah(mat_actif, h, is_h_odds, cote)
-            ev_pinnacle = calculer_ev_ah(mat_actif, h, is_h_odds, cote_novig)
-            ev_final   = (ev_modele * poids_dyn) + (ev_pinnacle * (1 - poids_dyn))
+            ev_final = (ev_modele * poids_dyn) + (ev_pinnacle * (1 - poids_dyn))
 
             if ev_min_rotation <= ev_final <= ligue['ev_max']:
-                kelly_theorique = calculer_kelly_ah(mat_actif, h, is_h_odds, cote)
                 mise_u = round((kelly_theorique * 100) * KELLY_COURANT, 2)
                 mise_u = min(mise_u, 5.0)
                 if mise_u >= 0.1:
                     candidats.append({
                         'ev_final': ev_final, 'ev_modele': ev_modele, 'ev_pinnacle': ev_pinnacle,
-                        'h': h, 'cote': cote, 'nom': nom, 'mise_u': mise_u
+                        'h': h, 'cote': cote, 'nom': nom, 'mise_u': mise_u,
+                        'market_key': market_key, 'market_label': market_label,
+                        'pari_display': pari_display,
                     })
 
-        if not candidats:
-            continue
+    if not candidats:
+        return
 
-        # Sélectionner le spread avec le meilleur EV final
-        best = max(candidats, key=lambda x: x['ev_final'])
-        h, cote, nom  = best['h'], best['cote'], best['nom']
-        ev_final      = best['ev_final']
-        ev_modele     = best['ev_modele']
-        ev_pinnacle   = best['ev_pinnacle']
-        mise_u        = best['mise_u']
+    best = max(candidats, key=lambda x: x['ev_final'])
+    h, cote, nom = best['h'], best['cote'], best['nom']
+    ev_final, ev_modele, ev_pinnacle, mise_u = (
+        best['ev_final'], best['ev_modele'], best['ev_pinnacle'], best['mise_u']
+    )
 
-        badge         = "✅ *XI CONFIRMÉ*" if lineup_ok else "⏳ *Compo Probable*"
-        rotation_note = f"\n⚠️ {alerte_lineup_text}" if alerte_lineup_text else ""
+    badge = "✅ *XI CONFIRMÉ*" if lineup_ok else "⏳ *Compo Probable*"
+    rotation_note = f"\n⚠️ {alerte_lineup_text}" if alerte_lineup_text else ""
 
-        msg = (f"🎯 *SIGNAL [{ligue['nom']}] 🏆 HANDICAP*\n"
-               f"🏟️ {n_d} - {n_e}\n{badge} | {hko_label}{rotation_note}\n"
-               f"💎 Pari : *{nom} ({h:+g})* @ {cote:.2f}\n"
-               f"🔥 Value : *+{ev_final:.1%}* (Mod: {ev_modele:+.1%} | Pin: {ev_pinnacle:+.1%})\n"
-               f"📏 Mise Kelly : *{mise_u} u*")
-        await envoyer_telegram_async(session, msg)
+    msg = (f"🎯 *SIGNAL [{ligue['nom']}] {best['market_label']}*\n"
+           f"🏟️ {n_d} - {n_e}\n{badge} | {hko_label}{rotation_note}\n"
+           f"💎 Pari : *{best['pari_display']}* @ {cote:.2f}\n"
+           f"🔥 Value : *+{ev_final:.1%}* (Mod: {ev_modele:+.1%} | Pin: {ev_pinnacle:+.1%})\n"
+           f"📏 Mise Kelly : *{mise_u} u*")
+    await envoyer_telegram_async(session, msg)
 
-        async with db_lock:
-            ligue_tag = f"{ligue['nom']} [{market_key}]"
-            await db_conn.execute("""INSERT OR IGNORE INTO paris_log
-                (id_match, equipe, handicap, cote_prise, mise, edge_detecte, p_modele, ligue,
-                 is_lineup_official, timestamp, equipe_dom, equipe_ext, kickoff)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (id_m, nom, h, cote, mise_u, round(ev_final, 4), round(ev_modele, 4), ligue_tag,
-                 int(lineup_ok), datetime.now().isoformat(),
-                 home_team_odds, away_team_odds, m['fixture']['date']))
-            await db_conn.commit()
+    async with db_lock:
+        ligue_tag = f"{ligue['nom']} [{best['market_key']}]"
+        await db_conn.execute("""INSERT OR IGNORE INTO paris_log
+            (id_match, equipe, handicap, cote_prise, mise, edge_detecte, p_modele, ligue,
+             is_lineup_official, timestamp, equipe_dom, equipe_ext, kickoff)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (id_m, nom, h, cote, mise_u, round(ev_final, 4), round(ev_modele, 4), ligue_tag,
+             int(lineup_ok), datetime.now().isoformat(),
+             home_team_odds, away_team_odds, m['fixture']['date']))
+        await db_conn.commit()
 
 # ==========================================
 # 🚀 5. FONCTIONS MATHS & xG
@@ -2199,7 +2217,20 @@ def nettoyer_caches_memoire():
     for k in cles_standings_a_supprimer:
         del cache_standings[k]
 
-    log_info(f"🧹 Nettoyage RAM : {len(cles_matchs_a_supprimer)} matchs et {len(cles_standings_a_supprimer)} ligues purgés.")
+    # Purge RHO_DYNAMIQUE / DC_PARAMS : garder saison courante + N-1 uniquement
+    annee = maintenant.year
+    saison_courante = annee if maintenant.month >= 7 else annee - 1
+    min_saison = saison_courante - 1
+    cles_rho = [k for k in RHO_DYNAMIQUE if k[1] < min_saison]
+    cles_dc  = [k for k in DC_PARAMS if k[1] < min_saison]
+    for k in cles_rho:
+        del RHO_DYNAMIQUE[k]
+    for k in cles_dc:
+        del DC_PARAMS[k]
+
+    log_info(f"🧹 Nettoyage RAM : {len(cles_matchs_a_supprimer)} matchs, "
+             f"{len(cles_standings_a_supprimer)} ligues, "
+             f"{len(cles_rho)} ρ et {len(cles_dc)} DC params purgés.")
 
 async def traiter_une_ligue(session, ligue) -> int:
     """Traite une ligue : récupère stats, cotes et matchs, lance les analyses.
@@ -2211,7 +2242,7 @@ async def traiter_une_ligue(session, ligue) -> int:
     if not stats:
         return 0
 
-    url_cotes = f"https://api.the-odds-api.com/v4/sports/{ligue['key']}/odds/?apiKey={API_ODDS_KEY}&regions=eu&markets=spreads"
+    url_cotes = f"https://api.the-odds-api.com/v4/sports/{ligue['key']}/odds/?apiKey={API_ODDS_KEY}&regions=eu&markets=spreads,totals"
     cotes = await fetch_async(session, url_cotes)
     date_deb = datetime.now().strftime('%Y-%m-%d')
     date_fin = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
